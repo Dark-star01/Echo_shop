@@ -1,0 +1,586 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* 🎨 غيّر هذه المتغيرات فقط لتغيير هوية الموقع بالكامل */
+    --bg: #0a0505;
+    --bg-alt: #120808;
+    --card: #180a0a;
+    --card-alt: #200d0d;
+    --border: #3a1414;
+    --ruby: #a8192f;
+    --ruby-bright: #d92438;
+    --ruby-dark: #5c0f1c;
+    --gold: #d4af37;
+    --gold-bright: #f0c85a;
+    --gold-dark: #8a6a1f;
+    --text: #f2e6d8;
+    --text-muted: #b89a9a;
+    --success: #4ade80;
+    --danger: #ef4444;
+    --warning: #fbbf24;
+}
+
+body {
+    font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif;
+    background:
+        radial-gradient(ellipse at top, #1a0808 0%, var(--bg) 55%),
+        var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+}
+
+.hidden { display: none !important; }
+
+/* ============================================================
+   🔐 شاشة تسجيل الدخول
+============================================================= */
+#login-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background:
+        radial-gradient(circle at 50% 20%, rgba(168, 25, 47, 0.25), transparent 60%),
+        var(--bg);
+}
+
+.login-card {
+    width: 100%;
+    max-width: 380px;
+    background: linear-gradient(180deg, var(--card) 0%, var(--card-alt) 100%);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 36px 30px;
+    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.08), 0 20px 60px rgba(0,0,0,0.6), 0 0 40px rgba(168,25,47,0.15);
+}
+
+.brand { text-align: center; margin-bottom: 28px; }
+
+.brand-emblem {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Cinzel', serif;
+    font-weight: 900;
+    font-size: 28px;
+    color: var(--gold-bright);
+    background: radial-gradient(circle at 35% 30%, var(--ruby-bright), var(--ruby-dark) 75%);
+    border: 2px solid var(--gold);
+    box-shadow: 0 0 20px rgba(168,25,47,0.6), inset 0 0 12px rgba(0,0,0,0.5);
+}
+
+.brand-emblem.small {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+    margin: 0;
+}
+
+.brand-title {
+    font-family: 'Cinzel', serif;
+    font-weight: 900;
+    font-size: 26px;
+    letter-spacing: 2px;
+    color: var(--ruby-bright);
+    text-shadow: 0 0 18px rgba(217,36,56,0.5);
+}
+
+.brand-title span { color: var(--gold-bright); }
+
+.brand-sub {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.login-error {
+    background: rgba(239,68,68,0.12);
+    border: 1px solid var(--danger);
+    color: #fca5a5;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 14px;
+    text-align: center;
+}
+
+.login-note {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-top: 18px;
+    line-height: 1.6;
+}
+
+/* ============================================================
+   🧩 عام
+============================================================= */
+.container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 22px;
+    background: linear-gradient(135deg, var(--card) 0%, var(--card-alt) 100%);
+    border-radius: 14px;
+    margin-bottom: 18px;
+    border: 1px solid var(--border);
+    flex-wrap: wrap;
+    gap: 14px;
+}
+
+.header-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+header h1 {
+    font-family: 'Cinzel', serif;
+    font-weight: 900;
+    font-size: 20px;
+    letter-spacing: 1.5px;
+    color: var(--ruby-bright);
+}
+
+header h1 span { color: var(--gold-bright); }
+
+.header-sub {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.stat-pill {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 14px;
+    text-align: center;
+    min-width: 90px;
+}
+
+.stat-label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--gold-bright);
+}
+
+.stat-value.success { color: var(--success); }
+
+.logout-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 8px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: 0.2s;
+}
+
+.logout-btn:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+/* ============================================================
+   🗂️ التبويبات
+============================================================= */
+.tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 18px;
+    overflow-x: auto;
+}
+
+.tab-btn {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 10px 18px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: 0.2s;
+    font-family: inherit;
+}
+
+.tab-btn:hover {
+    color: var(--text);
+    border-color: var(--gold-dark);
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, var(--ruby-dark), var(--ruby));
+    border-color: var(--gold);
+    color: #fff;
+    box-shadow: 0 0 14px rgba(168,25,47,0.35);
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+section {
+    background: linear-gradient(180deg, var(--card) 0%, var(--card-alt) 100%);
+    border-radius: 14px;
+    padding: 22px;
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+}
+
+.panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+section h2 {
+    font-family: 'Cinzel', serif;
+    color: var(--gold-bright);
+    font-size: 17px;
+    font-weight: 700;
+}
+
+.search-box {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 13px;
+    min-width: 200px;
+    font-family: inherit;
+}
+
+.search-box:focus { outline: none; border-color: var(--gold-dark); }
+
+.secondary-btn {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: 0.2s;
+    font-family: inherit;
+}
+
+.secondary-btn:hover { border-color: var(--gold-dark); color: var(--text); }
+
+/* ============================================================
+   💎 بطاقات المنتجات
+============================================================= */
+#products, #logs {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.product {
+    background: var(--card-alt);
+    padding: 16px 18px;
+    border-radius: 10px;
+    border-inline-start: 4px solid var(--gold);
+    border: 1px solid var(--border);
+    border-inline-start-width: 4px;
+    border-inline-start-color: var(--gold);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+    transition: 0.2s;
+}
+
+.product:hover {
+    border-color: var(--gold-dark);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.35);
+}
+
+.product .info { flex: 1; min-width: 220px; }
+
+.product .info h3 {
+    color: var(--text);
+    font-size: 16px;
+    margin-bottom: 6px;
+    font-weight: 700;
+}
+
+.product .info .price {
+    color: var(--gold-bright);
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.product .info .desc {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-top: 5px;
+}
+
+.product .info .features {
+    color: var(--ruby-bright);
+    font-size: 13px;
+    margin-top: 5px;
+    white-space: pre-wrap;
+}
+
+.product .meta {
+    font-size: 11px;
+    color: #7a6060;
+    margin-top: 6px;
+}
+
+.product .meta code {
+    background: var(--bg-alt);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+
+.product .actions {
+    display: flex;
+    gap: 8px;
+}
+
+.product .actions button {
+    padding: 7px 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    transition: 0.2s;
+    font-family: inherit;
+}
+
+.edit-btn {
+    background: var(--gold);
+    color: #1a0e00;
+}
+.edit-btn:hover { background: var(--gold-bright); }
+
+.delete-btn {
+    background: var(--ruby);
+    color: #fff;
+}
+.delete-btn:hover { background: var(--ruby-bright); }
+
+/* شارات حالة اللوق */
+.status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+}
+.status-success { background: rgba(74,222,128,0.15); color: var(--success); border: 1px solid rgba(74,222,128,0.4); }
+.status-underpaid, .status-overpaid { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.4); }
+.status-timeout { background: rgba(251,191,36,0.15); color: var(--warning); border: 1px solid rgba(251,191,36,0.4); }
+
+/* ============================================================
+   📝 نماذج
+============================================================= */
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.form-group { margin-bottom: 14px; }
+
+label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+input, textarea {
+    width: 100%;
+    padding: 11px 14px;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 14px;
+    transition: 0.2s;
+    font-family: inherit;
+}
+
+input:focus, textarea:focus {
+    outline: none;
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(212,175,55,0.12);
+}
+
+textarea { resize: vertical; }
+
+button[type="submit"] {
+    width: 100%;
+    padding: 13px;
+    background: linear-gradient(135deg, var(--ruby-dark), var(--ruby));
+    border: 1px solid var(--gold-dark);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s;
+    font-family: inherit;
+}
+
+button[type="submit"]:hover {
+    background: linear-gradient(135deg, var(--ruby), var(--ruby-bright));
+    box-shadow: 0 0 20px rgba(168,25,47,0.4);
+}
+
+#loginBtn {
+    width: 100%;
+    padding: 13px;
+    margin-top: 6px;
+    background: linear-gradient(135deg, var(--ruby-dark), var(--ruby));
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s;
+    font-family: inherit;
+}
+
+#loginBtn:hover {
+    background: linear-gradient(135deg, var(--ruby), var(--ruby-bright));
+    box-shadow: 0 0 24px rgba(168,25,47,0.5);
+}
+
+#loginBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ============================================================
+   🪟 نافذة التعديل المنبثقة
+============================================================= */
+.modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(5,2,2,0.75);
+    backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 20px;
+}
+
+.modal-box {
+    width: 100%;
+    max-width: 460px;
+    background: linear-gradient(180deg, var(--card) 0%, var(--card-alt) 100%);
+    border: 1px solid var(--gold-dark);
+    border-radius: 14px;
+    padding: 26px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-box h2 {
+    font-family: 'Cinzel', serif;
+    color: var(--gold-bright);
+    margin-bottom: 18px;
+    font-size: 18px;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.modal-actions button[type="submit"] { flex: 2; }
+.modal-actions .secondary-btn { flex: 1; }
+
+/* ============================================================
+   🔔 التنبيهات (Toast)
+============================================================= */
+#toast-container {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 200;
+}
+
+.toast {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-inline-start: 4px solid var(--gold);
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    animation: toast-in 0.25s ease;
+    max-width: 300px;
+}
+
+.toast.error { border-inline-start-color: var(--danger); }
+.toast.success { border-inline-start-color: var(--success); }
+
+@keyframes toast-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.loader, .empty-message {
+    color: var(--text-muted);
+    text-align: center;
+    padding: 30px;
+    font-size: 14px;
+}
+
+/* ============================================================
+   📱 تجاوب
+============================================================= */
+@media (max-width: 640px) {
+    header { flex-direction: column; align-items: stretch; text-align: center; }
+    .header-brand { justify-content: center; }
+    .header-actions { justify-content: center; }
+    .form-row { grid-template-columns: 1fr; }
+    .product { flex-direction: column; }
+    .product .actions { width: 100%; }
+    .product .actions button { flex: 1; }
+}
