@@ -41,7 +41,17 @@ function formatDuration(ms) {
     return `${minutes} دقيقة`;
 }
 
+// يمنع أي خطوة (قاعدة بيانات/ديسكورد) من تعليق العملية للأبد
+function withTimeout(promise, ms, label = 'العملية') {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error(`انتهت مهلة: ${label} (${Math.round(ms / 1000)}ث)`), { code: 'STEP_TIMEOUT' })), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 module.exports = {
+    withTimeout,
     formatCurrency,
     calculateSendAmount,
     calculateMaxNet,

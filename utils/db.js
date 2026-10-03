@@ -1,9 +1,19 @@
 // utils/db.js - طبقة الاتصال بقاعدة بيانات Supabase
 const { createClient } = require('@supabase/supabase-js');
 
+// أي طلب لسوبابيس يُقطع بعد 15 ثانية بدل ما يعلّق البوت (مثلاً لو المشروع متوقف أو الشبكة بطيئة)
+const DB_TIMEOUT_MS = Number(process.env.DB_TIMEOUT_MS) || 15_000;
+const fetchWithTimeout = (url, options = {}) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DB_TIMEOUT_MS);
+    options.signal?.addEventListener?.('abort', () => controller.abort());
+    return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+};
+
 const supabase = createClient(
     process.env.SUPABASE_URL,
-    process.env.SUPABASE_KEY
+    process.env.SUPABASE_KEY,
+    { global: { fetch: fetchWithTimeout } }
 );
 
 // ============================================================

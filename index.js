@@ -17,7 +17,7 @@ const {
 } = require('discord.js');
 const db = require('./utils/db.js');
 const adminCommand = require('./commands/admin.js');
-const { calculateSendAmount, formatDuration } = require('./utils/helpers.js');
+const { calculateSendAmount, formatDuration, withTimeout } = require('./utils/helpers.js');
 const {
     eph, ticketTopic, staffMention, isStaffMember, checkTicketAccess, findOpenTicket, scheduleDelete, ticketButtonsRow,
 } = require('./utils/tickets.js');
@@ -111,7 +111,9 @@ client.once(Events.ClientReady, async () => {
 // ============================================================
 //  🧩  مكوّنات مشتركة
 // ============================================================
-const ticketCreationLocks = new Set(); // يمنع فتح تذكرتين بنفس اللحظة لنفس العضو
+const ticketCreationLocks = new Map(); // userId -> وقت البدء؛ يمنع فتح تذكرتين بنفس اللحظة لنفس العضو
+const TICKET_LOCK_MS = 60_000;
+const ticketStepMs = () => Number(process.env.TICKET_STEP_TIMEOUT_MS) || 20_000;
 const confirmLocks = new Set();        // يمنع بدء عمليتي دفع بنفس التذكرة
 const staffCallCooldown = new Map();   // channelId -> وقت آخر نداء للستاف
 const STAFF_CALL_COOLDOWN_MS = 60_000;
@@ -207,33 +209,41 @@ async function handleInteraction(interaction) {
         const guild = interaction.guild;
         const member = interaction.member;
 
-        if (ticketCreationLocks.has(member.id)) {
+        // القفل ينتهي تلقائياً بعد 60 ثانية حتى لا يبقى العضو عالقاً على «جاري فتح تذكرتك»
+        const lockedAt = ticketCreationLocks.get(member.id);
+        if (lockedAt && Date.now() - lockedAt < TICKET_LOCK_MS) {
             return interaction.reply(eph('⏳ جاري فتح تذكرتك، انتظر لحظة.'));
         }
-        ticketCreationLocks.add(member.id);
+        ticketCreationLocks.set(member.id, Date.now());
+
+        const startedAt = Date.now();
+        const reply = (content) => interaction.editReply({ content }).catch(() => {});
+        const step = (promise, label) => withTimeout(promise, ticketStepMs(), label);
+        let ticketChannel = null;
 
         try {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
             const category = guild.channels.cache.get(process.env.TICKET_CATEGORY_ID);
             if (!category || category.type !== ChannelType.GuildCategory) {
-                return interaction.editReply({ content: '❌ فئة التذاكر غير موجودة أو غير صالحة!' });
+                return reply('❌ فئة التذاكر غير موجودة أو غير صالحة!');
             }
 
             const existing = findOpenTicket(category, member.id);
             if (existing) {
-                return interaction.editReply({ content: `⚠️ عندك تذكرة مفتوحة بالفعل: ${existing}` });
+                return reply(`⚠️ عندك تذكرة مفتوحة بالفعل: ${existing}`);
             }
 
             let products;
             try {
-                products = await db.getAllProducts();
+                products = await step(db.getAllProducts(), 'جلب المنتجات');
             } catch (error) {
                 console.error('❌ فشل جلب المنتجات:', error);
-                return interaction.editReply({ content: '❌ حدث خطأ أثناء جلب المنتجات.' });
+                alerts.alertError('فتح تذكرة: فشل جلب المنتجات', error, { context: member.user?.tag });
+                return reply('❌ حدث خطأ أثناء جلب المنتجات، حاول بعد قليل.');
             }
             if (products.length === 0) {
-                return interaction.editReply({ content: '❌ لا توجد منتجات متاحة حالياً.' });
+                return reply('❌ لا توجد منتجات متاحة حالياً.');
             }
 
             const Flags = PermissionsBitField.Flags;
@@ -241,33 +251,31 @@ async function handleInteraction(interaction) {
             const overwrites = [
                 { id: guild.id, deny: [Flags.ViewChannel] },
                 { id: member.id, allow: ticketPerms },
-                { id: client.user.id, allow: ticketPerms },
+                { id: client.user.id, allow: [...ticketPerms, Flags.EmbedLinks] },
             ];
             if (process.env.STAFF_ROLE_ID) overwrites.push({ id: process.env.STAFF_ROLE_ID, allow: ticketPerms });
 
-            let ticketChannel;
             try {
-                ticketChannel = await guild.channels.create({
+                ticketChannel = await step(guild.channels.create({
                     name: `ticket-${member.user.username}`,
                     type: ChannelType.GuildText,
                     parent: category.id,
                     topic: ticketTopic(member.id),
                     permissionOverwrites: overwrites,
-                });
+                }), 'إنشاء روم التذكرة');
             } catch (error) {
                 console.error('❌ فشل إنشاء التذكرة:', error);
-                return interaction.editReply({ content: '❌ تعذّر إنشاء التذكرة (قد تكون فئة التذاكر ممتلئة). تواصل مع الستاف.' });
+                alerts.alertError('فتح تذكرة: فشل إنشاء الروم', error, { context: member.user?.tag });
+                return reply('❌ تعذّر إنشاء التذكرة (قد تكون فئة التذاكر ممتلئة أو ديسكورد بطيء). تواصل مع الستاف.');
             }
-
-            await interaction.editReply({ content: `✅ تم فتح تذكرتك في ${ticketChannel}` });
 
             const selectMenu = new StringSelectMenuBuilder()
                 .setCustomId('select_role')
                 .setPlaceholder('اختر الرتبة التي تريد شراءها')
                 .addOptions(
                     products.slice(0, 25).map(p => ({ // حد ديسكورد: 25 خيار بالقائمة
-                        label: p.name.slice(0, 100),
-                        description: `${p.price.toLocaleString()} كريديت`,
+                        label: (p.name || `منتج #${p.id}`).slice(0, 100),
+                        description: `${Number(p.price).toLocaleString()} كريديت`,
                         value: String(p.id),
                     }))
                 );
@@ -277,11 +285,27 @@ async function handleInteraction(interaction) {
                 .setTitle('🛒 Echo Shop — اختر الرتبة')
                 .setDescription('اختر الرتبة التي تريد شراءها من القائمة أدناه.\nإذا احتجت مساعدة بأي وقت، اضغط زر **طلب ستاف**.');
 
-            await ticketChannel.send({
-                content: `${member}`,
-                embeds: [embed],
-                components: [new ActionRowBuilder().addComponents(selectMenu), ticketButtonsRow()],
-            });
+            // نرسل اللوحة أولاً: لو فشل الإرسال نحذف الروم الفاضي بدل ما تبقى تذكرة ميتة تحجز العضو
+            try {
+                await step(ticketChannel.send({
+                    content: `${member}`,
+                    embeds: [embed],
+                    components: [new ActionRowBuilder().addComponents(selectMenu), ticketButtonsRow()],
+                }), 'إرسال لوحة الاختيار');
+            } catch (error) {
+                console.error('❌ فشل إرسال لوحة التذكرة، يُحذف الروم:', error);
+                alerts.alertError('فتح تذكرة: فشل إرسال اللوحة', error, { context: `${member.user?.tag} — ${ticketChannel.name}` });
+                await ticketChannel.delete().catch(() => {});
+                return reply('❌ تعذّر تجهيز التذكرة (صلاحيات البوت في الفئة؟). حاول مرة أخرى أو تواصل مع الستاف.');
+            }
+
+            await reply(`✅ تم فتح تذكرتك في ${ticketChannel}`);
+            const took = Date.now() - startedAt;
+            if (took > 4000) console.warn(`⚠️ فتح التذكرة استغرق ${Math.round(took / 1000)}ث (${member.user?.tag}) — راجع سرعة سوبابيس/ديسكورد`);
+        } catch (error) {
+            // خطأ غير متوقع بعد إنشاء الروم: لا نترك روماً فاضياً
+            if (ticketChannel) await ticketChannel.delete().catch(() => {});
+            throw error;
         } finally {
             ticketCreationLocks.delete(member.id);
         }

@@ -1,12 +1,12 @@
 {
   "name": "echo-shop",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Echo Shop — Discord role shop with ticket system and web dashboard",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "node test/payments.test.js && node test/flows.test.js && node test/dashboard.test.js",
+    "test": "node test/payments.test.js && node test/flows.test.js && node test/tickets.test.js && node test/dashboard.test.js",
     "check": "node --check index.js && node --check dashboard/server.js"
   },
   "dependencies": {

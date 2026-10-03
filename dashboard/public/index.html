@@ -31,6 +31,7 @@
       <button data-view="products" title="المنتجات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg><span>المنتجات</span></button>
       <button data-view="coupons" title="الكوبونات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg><span>الكوبونات</span></button>
       <button data-view="orders" title="الطلبات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>الطلبات</span> <span id="attBadge" class="badge warn" hidden></span></button>
+      <button data-view="reviews" title="المراجعات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg><span>المراجعات</span> <span id="revBadge" class="badge info" hidden></span></button>
       <button data-view="subs" title="الاشتراكات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>الاشتراكات</span></button>
       <button data-view="settings" title="الإعدادات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>الإعدادات</span></button>
     </nav>
@@ -45,6 +46,7 @@
     <section id="v-overview">
       <h2>نظرة عامة</h2>
       <div id="attention" class="alert" hidden></div>
+      <div id="reviewAlert" class="alert info" hidden></div>
       <div class="strip" id="stats"></div>
       <h3>إيرادات آخر 14 يوم</h3>
       <div class="chart" id="chart"></div>
@@ -80,6 +82,12 @@
         </select>
       </div>
       <div class="table-wrap"><table id="ordersTable"></table></div>
+    </section>
+
+    <section id="v-reviews" hidden>
+      <div class="head"><h2>مراجعة الرتب</h2></div>
+      <p class="hint">رتب مخصصة طلب أصحابها مراجعة الستاف قبل الإنشاء. راجع المدخلات ثم وافق لإنشاء الرتبة وتسليمها، أو ارفض مع ذكر السبب ليعدّلها العميل.</p>
+      <div id="reviewsList" class="reviews"></div>
     </section>
 
     <section id="v-subs" hidden>

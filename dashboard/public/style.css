@@ -141,6 +141,26 @@ td.act .v{display:flex;gap:.4rem;flex-wrap:wrap}
 .sk{height:14px;border-radius:7px;margin:.7rem 0;background:linear-gradient(90deg,var(--panel2) 25%,var(--line2) 50%,var(--panel2) 75%);background-size:200% 100%;animation:shimmer 1.3s linear infinite}
 .sk:nth-child(2){width:80%}.sk:nth-child(3){width:60%}
 
+/* ---------- مراجعة الرتب ---------- */
+.reviews{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1rem}
+.review{min-width:0;display:grid;gap:.9rem;background:linear-gradient(160deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:var(--r);padding:1.1rem;animation:rise .45s var(--ease) both;transition:border-color .2s,box-shadow .2s}
+.review:hover{border-color:var(--line2);box-shadow:0 18px 40px -22px var(--glow)}
+.review header{display:flex;gap:.7rem;align-items:center}
+.review header div{min-width:0;flex:1}.review header b{display:block;overflow:hidden;text-overflow:ellipsis}
+.review .sub{color:var(--muted);font-size:.82rem;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.review .when{flex:none;white-space:nowrap}
+.rolechip{display:flex;align-items:center;gap:.6rem;background:var(--bg2);border:1px solid var(--line);border-radius:99px;padding:.5rem .9rem;width:fit-content;max-width:100%}
+.rolebar{width:12px;height:12px;border-radius:50%;background:var(--role);flex:none;box-shadow:0 0 10px -1px var(--role)}
+.rolechip img{width:20px;height:20px;border-radius:5px;object-fit:cover}
+.rolename{font-weight:700;overflow:hidden;text-overflow:ellipsis;background:var(--role);-webkit-background-clip:text;background-clip:text;color:transparent;filter:saturate(1.1) brightness(1.15)}
+.review dl{display:grid;gap:.45rem}.review dl div{display:flex;gap:.8rem;justify-content:space-between;align-items:flex-start;border-bottom:1px dashed var(--line);padding-bottom:.4rem}
+.review dt{color:var(--muted);font-size:.85rem;flex:none}.review dd{text-align:end;min-width:0;display:flex;gap:.3rem;flex-wrap:wrap;justify-content:flex-end;align-items:center;overflow-wrap:anywhere}
+.cols{gap:.5rem!important}.sw{display:inline-block;width:16px;height:16px;border-radius:5px;border:1px solid var(--line2)}
+.warnline{color:var(--warn);font-size:.88rem}
+.review footer{display:flex;gap:.6rem}.review footer .btn{flex:1}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none!important}
+.alert.info{background:linear-gradient(90deg,rgba(139,92,246,.16),rgba(139,92,246,.04));border-color:rgba(139,92,246,.5);color:var(--accent2)}
+
 /* ---------- النماذج ---------- */
 .panel{background:linear-gradient(170deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:var(--r);padding:1.3rem 1.5rem;display:grid;gap:1rem;max-width:640px}
 .panel h3{margin:.4rem 0 0;display:flex;align-items:center;gap:.6rem}
@@ -196,15 +216,16 @@ dialog p.msg{color:var(--muted)}
 /* ---------- جوال: شريط علوي + تنقل سفلي ---------- */
 @media(max-width:760px){
   .app{grid-template-columns:1fr;padding-bottom:76px}
-  .side{position:sticky;top:0;height:auto;flex-direction:row;align-items:center;justify-content:space-between;padding:.7rem 1rem;gap:.8rem;border-inline-end:0;border-bottom:1px solid var(--line)}
+  .side{backdrop-filter:none;background:var(--bg2);position:sticky;top:0;height:auto;flex-direction:row;align-items:center;justify-content:space-between;padding:.7rem 1rem;gap:.8rem;border-inline-end:0;border-bottom:1px solid var(--line)}
   .brand{font-size:1.05rem}.brand .logo{width:34px;height:34px}
   .user{margin:0;padding:0;border:0;background:none}.user #userName,.link span{display:none}
   .link{padding:.45rem;border:1px solid var(--line);border-radius:10px}
-  nav{position:fixed;inset:auto 0 0 0;z-index:20;display:grid;grid-template-columns:repeat(6,1fr);gap:0;padding:.35rem .4rem calc(.35rem + env(safe-area-inset-bottom));
+  nav{position:fixed;inset:auto 0 0 0;z-index:20;display:grid;grid-template-columns:repeat(7,1fr);gap:0;padding:.35rem .4rem calc(.35rem + env(safe-area-inset-bottom));
     background:rgba(13,11,20,.92);backdrop-filter:blur(14px);border-top:1px solid var(--line2)}
   nav button{flex-direction:column;gap:.15rem;padding:.4rem .1rem;font-size:.68rem;text-align:center;justify-content:center;border-radius:12px}
   nav button:hover{transform:none}
   nav button.active{box-shadow:0 6px 18px -6px var(--glow)}
+  nav button{min-width:0;font-size:.62rem}nav button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   nav .badge{position:absolute;top:0;inset-inline-end:14%;margin:0;padding:0 .35rem;font-size:.65rem}
   .content{padding:1.1rem 1rem 1.4rem}
   h2{font-size:1.4rem}
@@ -217,6 +238,7 @@ dialog p.msg{color:var(--muted)}
   .login-box{padding:2rem 1.3rem}
   dialog{padding:1.1rem}
   .actions .btn{flex:1}
+  .reviews{grid-template-columns:minmax(0,1fr)}
 
   /* الجداول تتحول لبطاقات */
   .table-wrap{border:0;background:none;overflow:visible}

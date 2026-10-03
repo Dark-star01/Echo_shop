@@ -31,7 +31,27 @@ async function checkChannel(guild, channel, hours) {
     }
 }
 
+// 🧹 تذاكر يتيمة: روم أُنشئ لكن لم تصله أي رسالة (فشل الإرسال/انقطاع) — تُحذف بعد دقيقتين من إنشائها
+const ORPHAN_AGE_MS = 2 * 60 * 1000;
+async function sweepEmptyTickets(guild, { dryRun = false } = {}) {
+    const category = guild.channels.cache.get(process.env.TICKET_CATEGORY_ID);
+    if (!category) return 0;
+    let count = 0;
+    for (const channel of [...category.children.cache.values()]) {
+        try {
+            if (channel.type !== ChannelType.GuildText || !getTicketOwnerId(channel)) continue;
+            if (!(Date.now() - channel.createdTimestamp >= ORPHAN_AGE_MS)) continue;
+            if ((await channel.messages.fetch({ limit: 1 })).size > 0) continue;
+            if ((await db.getOrdersByChannel(channel.id)).length > 0) continue;
+            count++;
+            if (!dryRun) { console.warn(`🧹 حذف تذكرة يتيمة فاضية: ${channel.name}`); await channel.delete('Echo Shop — تذكرة فاضية'); }
+        } catch (e) { console.error(`❌ فحص التذكرة اليتيمة ${channel.name}:`, e.message); }
+    }
+    return count;
+}
+
 async function runOnce(guild) {
+    await sweepEmptyTickets(guild).catch((e) => console.error('❌ تنظيف التذاكر اليتيمة:', e));
     try {
         const hours = Number((await db.getSettings()).idle_close_hours) || 0;
         const category = guild.channels.cache.get(process.env.TICKET_CATEGORY_ID);
@@ -46,8 +66,8 @@ async function runOnce(guild) {
 }
 
 function startIdleJob(guild) {
-    setTimeout(() => runOnce(guild), 60_000).unref();
+    setTimeout(() => runOnce(guild), 30_000).unref();
     setInterval(() => runOnce(guild), INTERVAL_MS).unref();
 }
 
-module.exports = { startIdleJob };
+module.exports = { startIdleJob, sweepEmptyTickets };

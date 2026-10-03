@@ -44,6 +44,10 @@ module.exports = {
             .addRoleOption(opt => opt.setName('role').setDescription('الرتبة').setRequired(true))
         )
         .addSubcommand(sub => sub
+            .setName('diagnose')
+            .setDescription('فحص صحة فتح التذاكر (صلاحيات، فئة، قاعدة بيانات)')
+        )
+        .addSubcommand(sub => sub
             .setName('setup')
             .setDescription('نشر إمبد المتجر في هذا الروم')
         ),
@@ -141,6 +145,13 @@ module.exports = {
                 await interaction.reply({ content: `✅ تم فك ربط ${role} (الرتبة نفسها لم تُحذف من السيرفر).`, flags: EPHEMERAL });
             } catch (error) {
                 await interaction.reply({ content: `❌ فشل فك الربط: ${error.message}`, flags: EPHEMERAL });
+            }
+        } else if (sub === 'diagnose') {
+            await interaction.deferReply({ flags: EPHEMERAL });
+            try {
+                await interaction.editReply({ embeds: [await require('../utils/diagnose.js').runDiagnostics(interaction.guild)] });
+            } catch (error) {
+                await interaction.editReply({ content: `❌ فشل التشخيص: ${error.message}` });
             }
         } else if (sub === 'setup') {
             try {

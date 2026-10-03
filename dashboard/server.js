@@ -7,6 +7,7 @@ const { isValidRoleId } = require('../utils/helpers.js');
 const { refreshShopMessage, refreshNow: refreshShopNow } = require('../utils/shopMessage.js');
 const { alertError } = require('../utils/alerts.js');
 const { PERMISSION_WHITELIST, COLOR_MODES, sanitizeCustomSettings } = require('../utils/customRoleConfig.js');
+const customRoles = require('../utils/customRoles.js');
 
 const ROLE_ID = process.env.DASHBOARD_ROLE_ID || '1458271551907565618'; // الرتبة المسموح لها بالدخول
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -227,6 +228,7 @@ function start(client) {
             revenue: sum(sold),
             revenueWeek: sum(sold.filter(o => new Date(o.created_at).getTime() > now - 7 * DAY)),
             attention: orders.filter(o => ['role_failed', 'error'].includes(o.status)).length,
+            reviews: orders.filter(o => o.status === 'pending_review').length,
             daily: Array.from({ length: 14 }, (_, i) => {
                 const day = new Date(now - (13 - i) * DAY).toISOString().slice(0, 10);
                 return { day, total: sum(sold.filter(o => o.created_at.slice(0, 10) === day)) };
@@ -234,6 +236,65 @@ function start(client) {
             subsActive: active.length,
             subsExpiring: active.filter(s => new Date(s.expires_at).getTime() < now + 3 * DAY).length,
         });
+    }));
+
+    // ---------- مراجعة الرتب المخصصة (بدل أزرار الموافقة داخل التذكرة) ----------
+    const iconUri = (b64) => (b64 ? `data:image/${b64.startsWith('/9j/') ? 'jpeg' : 'png'};base64,${b64}` : null);
+    async function reviewView(o) {
+        const d = o.draft || {}, member = await guild()?.members.fetch(o.user_id).catch(() => null);
+        return {
+            id: o.id, user_id: o.user_id, username: member?.user?.tag || o.username, in_server: Boolean(member),
+            avatar: member?.displayAvatarURL?.({ extension: 'png', size: 64 }) || null,
+            product_name: o.product_name, edit: o.product_type === 'custom_edit', channel_id: o.channel_id,
+            ticket_exists: Boolean(guild()?.channels.cache.get(o.channel_id)),
+            waiting_since: o.updated_at || o.created_at,
+            name: d.name || '', mode: d.mode, mode_label: COLOR_MODES[d.mode] || d.mode, color1: d.color1 || null, color2: d.color2 || null,
+            icon: iconUri(d.icon_b64),
+            permissions: (d.settings?.permissions || []).map(k => PERMISSION_WHITELIST[k] || k),
+        };
+    }
+    const pendingReview = async (id) => {
+        const o = await db.getOrderById(id);
+        return o && o.status === 'pending_review' && ['custom', 'custom_edit'].includes(o.product_type) && o.draft ? o : null;
+    };
+
+    app.get('/api/reviews', handle(async (req, res) => {
+        const list = (await db.getOrdersByStatus(['pending_review'])).filter(o => o.draft);
+        res.json(await Promise.all(list.map(reviewView)));
+    }));
+
+    app.post('/api/reviews/:id/approve', handle(async (req, res) => {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'رقم غير صالح' });
+        const order = await pendingReview(id);
+        if (!order) return res.status(404).json({ error: 'الطلب غير موجود أو تمت مراجعته بالفعل' });
+        const channel = await guild()?.channels.fetch(order.channel_id).catch(() => null);
+        if (!channel) return res.status(409).json({ error: 'تذكرة هذا الطلب محذوفة، لا يمكن إنشاء الرتبة. ارفضه لإغلاقه.' });
+        const member = await guild().members.fetch(order.user_id).catch(() => null);
+        if (!member) return res.status(409).json({ error: 'العميل غادر السيرفر.' });
+
+        await db.updateOrder(order.id, { status: 'paid' }); // يمنع موافقة مكررة/تعارض مع زر قديم داخل التذكرة
+        await channel.send({ content: `✅ وافق **${req.user.name}** على رتبتك من لوحة التحكم، جاري الإنشاء...`, allowedMentions: { parse: [] } }).catch(() => {});
+        const delivered = await customRoles.finalizeRole({ order: { ...order, status: 'paid' }, channel, member });
+        res.json({ success: true, delivered: Boolean(delivered) });
+    }));
+
+    app.post('/api/reviews/:id/reject', handle(async (req, res) => {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'رقم غير صالح' });
+        const reason = String(req.body?.reason || '').trim().slice(0, 300);
+        const order = await pendingReview(id);
+        if (!order) return res.status(404).json({ error: 'الطلب غير موجود أو تمت مراجعته بالفعل' });
+        const channel = await guild()?.channels.fetch(order.channel_id).catch(() => null);
+        if (!channel) { // التذكرة انحذفت: نغلق الطلب العالق
+            await db.updateOrder(order.id, { status: 'cancelled', error: `رُفض من الداشبورد (التذكرة محذوفة) — ${req.user.name}` });
+            return res.json({ success: true, closed: true });
+        }
+        const draft = { ...order.draft, confirmed: false };
+        await db.updateOrder(order.id, { status: 'customizing', draft });
+        const note = `❌ رفض الستاف رتبتك${reason ? `: **${reason}**` : ' بصيغتها الحالية'}.\nعدّلها واضغط تأكيد من جديد، أو اضغط طلب ستاف للاستفسار.`;
+        await channel.send({ content: `<@${order.user_id}>`, ...customRoles.panelPayload({ ...order, status: 'customizing', draft }, note) }).catch(() => {});
+        res.json({ success: true });
     }));
 
     // ---------- الاشتراكات ----------

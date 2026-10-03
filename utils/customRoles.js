@@ -262,13 +262,12 @@ async function handle(interaction) {
             await save(confirmed);
             await db.updateOrder(order.id, { status: 'pending_review' });
             await interaction.update({ embeds: [], components: [], content: '⏳ تم إرسال رتبتك لمراجعة الستاف، سيتم إنشاؤها فور الموافقة.' });
+            // المراجعة تتم من لوحة التحكم ← المراجعات (يرى الستاف كل المدخلات ويوافق أو يرفض من هناك)
+            const link = process.env.DASHBOARD_URL ? `\n🔗 ${process.env.DASHBOARD_URL.replace(/\/$/, '')} ← **المراجعات**` : '';
             return interaction.channel.send({
-                content: `${staffMention()} 🔎 طلب مراجعة رتبة مخصصة من ${interaction.member}`,
+                content: `${staffMention()} 🔎 طلب مراجعة رتبة مخصصة #${order.id} من ${interaction.member}\nراجعوه من لوحة التحكم ثم وافقوا أو ارفضوا.${link}`,
                 ...previewEmbed(d),
-                components: [new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`cust_approve_${order.id}`).setLabel('✅ موافقة وإنشاء').setStyle(ButtonStyle.Success),
-                    new ButtonBuilder().setCustomId(`cust_reject_${order.id}`).setLabel('❌ رفض').setStyle(ButtonStyle.Danger),
-                )],
+                allowedMentions: { roles: process.env.STAFF_ROLE_ID ? [process.env.STAFF_ROLE_ID] : [], users: [] },
             });
         }
         await interaction.update({ embeds: [], components: [], content: '⏳ جاري إنشاء رتبتك...' });
@@ -298,4 +297,4 @@ async function handle(interaction) {
     }
 }
 
-module.exports = { startCustomization, createCustomRole, editCustomRole, finalizeRole, handle };
+module.exports = { startCustomization, createCustomRole, editCustomRole, finalizeRole, handle, panelPayload };

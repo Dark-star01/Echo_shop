@@ -116,6 +116,52 @@ const log = (m) => console.log('✔', m);
     assert.equal((await call('POST', '/api/shop/refresh')).status, 404, 'لا يوجد إمبد منشور');
     log('الإحصائيات، الطلبات، الاشتراكات (تمديد/سحب)، تحديث الإمبد');
 
+    // ---- مراجعة الرتب المخصصة ----
+    const cust = W.makeMember('900000000000000007');
+    const mkReview = (channel, extra = {}) => {
+        const o = { id: st.nextId++, status: 'pending_review', product_type: 'custom', product_id: 2, product_name: 'Custom', user_id: cust.id, username: cust.user.tag,
+            channel_id: channel.id, required_amount: 2000, created_at: new Date().toISOString(), role_id: null,
+            draft: { mode: 'gradient', name: 'Royal', color1: '#FF5733', color2: '#3366FF', confirmed: true, icon_b64: Buffer.from('png').toString('base64'),
+                settings: { color_modes: ['solid', 'gradient'], allow_icon: true, max_name_length: 20, banned_words: [], permissions: ['ChangeNickname'], require_review: true } }, ...extra };
+        st.orders.push(o); return o;
+    };
+    const tk1 = W.makeChannel('ticket-c1'); W.guild.channels.cache.set(tk1.id, tk1);
+    const r1 = mkReview(tk1);
+    const rv = (await call('GET', '/api/reviews')).data;
+    assert.equal(rv.length, 1); assert.equal(rv[0].name, 'Royal'); assert.equal(rv[0].mode_label, 'ثنائي اللون (تدرج)');
+    assert.deepEqual(rv[0].permissions, ['تغيير الاسم المستعار']); assert.ok(rv[0].icon.startsWith('data:image/png;base64,'));
+    assert.equal(rv[0].in_server, true); assert.equal(rv[0].ticket_exists, true);
+    assert.equal((await call('GET', '/api/stats')).data.reviews, 1);
+    assert.equal((await call('POST', '/api/reviews/abc/approve')).status, 400);
+    assert.equal((await call('POST', '/api/reviews/99999/approve')).status, 404);
+    assert.equal((await call('POST', '/api/reviews/999/reject', { reason: 'x' })).status, 404);
+
+    // رفض مع سبب: يرجع للتخصيص ويصل العميل السبب ولوحة جديدة
+    assert.equal((await call('POST', `/api/reviews/${r1.id}/reject`, { reason: 'الاسم غير مناسب' })).status, 200);
+    assert.equal(r1.status, 'customizing'); assert.equal(r1.draft.confirmed, false);
+    const rej = tk1.sent.at(-1); assert.ok(rej.content.includes(cust.id) && JSON.stringify(rej).includes('الاسم غير مناسب') && rej.components.length >= 2);
+    assert.equal((await call('POST', `/api/reviews/${r1.id}/reject`, {})).status, 404, 'مراجعة مكررة');
+    assert.equal((await call('GET', '/api/reviews')).data.length, 0);
+
+    // موافقة: تنشأ الرتبة وتُسلَّم وتُسجَّل
+    r1.status = 'pending_review'; const rolesBefore = W.guild.roles.createCalls.length;
+    const ap = await call('POST', `/api/reviews/${r1.id}/approve`);
+    assert.equal(ap.status, 200); assert.equal(ap.data.delivered, true);
+    assert.equal(r1.status, 'completed'); assert.equal(W.guild.roles.createCalls.length, rolesBefore + 1);
+    assert.equal(W.guild.roles.createCalls.at(-1).name, 'Royal'); assert.ok(st.customRoles.some(c => c.user_id === cust.id));
+    assert.ok(tk1.sent.some(m => JSON.stringify(m).includes('وافق')), 'إشعار الموافقة في التذكرة');
+    assert.equal((await call('POST', `/api/reviews/${r1.id}/approve`)).status, 404, 'موافقة مكررة');
+
+    // تذكرة محذوفة: الموافقة مرفوضة والرفض يغلق الطلب العالق
+    const tk2 = W.makeChannel('ticket-c2'); const r2 = mkReview(tk2); // غير مسجلة = محذوفة
+    assert.equal((await call('POST', `/api/reviews/${r2.id}/approve`)).status, 409);
+    assert.equal((await call('POST', `/api/reviews/${r2.id}/reject`, {})).data.closed, true); assert.equal(r2.status, 'cancelled');
+    // عميل غادر
+    const tk3 = W.makeChannel('ticket-c3'); W.guild.channels.cache.set(tk3.id, tk3);
+    const r3 = mkReview(tk3, { user_id: '900000000000000099' });
+    assert.equal((await call('POST', `/api/reviews/${r3.id}/approve`)).status, 409); assert.equal(r3.status, 'pending_review');
+    log('مراجعة الرتب: عرض المدخلات، رفض بسبب، موافقة وتسليم، منع التكرار، تذكرة محذوفة، عميل غادر');
+
     console.log('\n✅ كل اختبارات الداشبورد نجحت');
     process.exit(0);
 })().catch((e) => { console.error('❌ فشل الاختبار:', e); process.exit(1); });

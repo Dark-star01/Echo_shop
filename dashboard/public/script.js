@@ -106,6 +106,7 @@ async function init() {
       ? `<img alt="" src="https://cdn.discordapp.com/avatars/${esc(me.id)}/${esc(me.avatar)}.png?size=64">`
       : esc(me.name.slice(0, 1));
     show('overview');
+  refreshBadges();
   } catch (e) {
     // لا تترك الصفحة فارغة إذا فشل /api/me لأي سبب غير 401 (مثل 500/503 أو مشكلة شبكة).
     showLogin();
@@ -125,8 +126,9 @@ const show = run(async (view) => {
     if (!s.hidden) { void s.offsetWidth; s.classList.add('enter'); }
   });
   document.querySelectorAll('.table-wrap table').forEach((t) => (t.innerHTML = SKELETON));
+  if (view === 'reviews') $('#reviewsList').innerHTML = '<div class="sk"></div><div class="sk"></div>';
   window.scrollTo({ top: 0 });
-  await ({ overview: loadOverview, products: loadProducts, orders: loadOrders, settings: loadSettings, coupons: loadCoupons, subs: loadSubs })[view]();
+  await ({ overview: loadOverview, products: loadProducts, orders: loadOrders, settings: loadSettings, coupons: loadCoupons, subs: loadSubs, reviews: loadReviews })[view]();
 });
 
 const statusBadge = (s) => { const [label, cls] = STATUS[s] || [s, 'muted']; return `<span class="badge ${cls}">${esc(label)}</span>`; };
@@ -156,6 +158,7 @@ async function loadOverview() {
   badge.textContent = stats.attention;
   att.innerHTML = `<span>${stats.attention} طلب دُفع ولم تُسلَّم رتبته بعد.</span><button class="btn sm" id="goAttention">عرضها</button>`;
   if (stats.attention) $('#goAttention').onclick = () => { $('#orderFilter').value = 'attention'; show('orders'); };
+  setReviewBadge(stats.reviews);
   const max = Math.max(...stats.daily.map((d) => d.total), 1);
   $('#chart').innerHTML = stats.daily.map((d, i) => `<div class="bar" data-tip="${d.day}: ${fmt(d.total)} كريديت">
     <i style="height:${Math.round((d.total / max) * 100)}%;--i:${i}"></i><span>${i % 2 === 0 ? d.day.slice(8) : '&nbsp;'}</span></div>`).join('');
@@ -247,6 +250,64 @@ function renderOrders() {
 }
 $('#orderFilter').onchange = renderOrders;
 $('#orderSearch').oninput = renderOrders;
+
+// ---------- مراجعة الرتب المخصصة ----------
+const HOLO = 'linear-gradient(120deg,#A9C9FF,#FFBBEC,#FFC3A0)';
+function setReviewBadge(n) {
+  const b = $('#revBadge'), a = $('#reviewAlert');
+  b.hidden = !n; b.textContent = n;
+  a.hidden = !n;
+  a.innerHTML = n ? `<span>🔎 ${n} رتبة مخصصة بانتظار مراجعتك.</span><button class="btn sm" id="goReviews">مراجعة</button>` : '';
+  if (n) $('#goReviews').onclick = () => show('reviews');
+}
+const refreshBadges = run(async () => setReviewBadge((await api('/api/stats')).reviews));
+const roleBg = (r) => (r.mode === 'holographic' ? HOLO : r.mode === 'gradient' && r.color1 && r.color2 ? `linear-gradient(90deg,${esc(r.color1)},${esc(r.color2)})` : esc(r.color1 || '#99aab5'));
+const swatch = (c) => (c ? `<span class="sw" style="background:${esc(c)}"></span><code>${esc(c)}</code>` : '—');
+let reviews = [];
+
+async function loadReviews() { reviews = await api('/api/reviews'); setReviewBadge(reviews.length); renderReviews(); }
+
+function renderReviews() {
+  $('#reviewsList').innerHTML = reviews.length ? reviews.map((r) => `
+    <article class="review" style="--role:${roleBg(r)}">
+      <header>
+        <span class="avatar">${r.avatar ? `<img alt="" src="${esc(r.avatar)}">` : esc((r.username || '?').slice(0, 1))}</span>
+        <div><b>${esc(r.username)}</b><span class="sub">${esc(r.user_id)} · ${esc(r.product_name)}${r.edit ? ' (تعديل)' : ''}</span></div>
+        <span class="sub when">${rel(r.waiting_since)}</span>
+      </header>
+      <div class="rolechip"><i class="rolebar"></i>${r.icon ? `<img alt="" src="${r.icon}">` : ''}<span class="rolename">${esc(r.name || '— بلا اسم —')}</span></div>
+      <dl>
+        <div><dt>الاسم</dt><dd>${esc(r.name)}</dd></div>
+        <div><dt>النمط</dt><dd>${esc(r.mode_label)}</dd></div>
+        ${r.mode !== 'holographic' ? `<div><dt>الألوان</dt><dd class="cols">${swatch(r.color1)}${r.mode === 'gradient' ? swatch(r.color2) : ''}</dd></div>` : ''}
+        <div><dt>الأيقونة</dt><dd>${r.icon ? 'مرفوعة' : 'بدون'}</dd></div>
+        <div><dt>الصلاحيات</dt><dd>${r.permissions.length ? r.permissions.map((p) => `<span class="badge muted">${esc(p)}</span>`).join(' ') : 'بدون'}</dd></div>
+      </dl>
+      ${!r.in_server ? '<p class="warnline">العميل غادر السيرفر.</p>' : ''}${!r.ticket_exists ? '<p class="warnline">تذكرة الطلب محذوفة — لا يمكن الإنشاء، يمكنك الرفض لإغلاق الطلب.</p>' : ''}
+      <footer>
+        <button class="btn primary" data-approve="${r.id}" ${r.in_server && r.ticket_exists ? '' : 'disabled'}>موافقة وإنشاء</button>
+        <button class="btn danger" data-reject="${r.id}">رفض</button>
+      </footer>
+    </article>`).join('')
+    : `<div class="empty">${EMPTY_ICON}لا توجد رتب بانتظار المراجعة. تظهر هنا حين ينشئ عميل رتبة من منتج «مراجعة الستاف».</div>`;
+}
+
+$('#reviewsList').onclick = run(async (e) => {
+  const a = e.target.closest('[data-approve]')?.dataset.approve, x = e.target.closest('[data-reject]')?.dataset.reject;
+  const r = reviews.find((v) => v.id == (a || x));
+  if (a && await ask({ title: 'الموافقة على الرتبة', text: `إنشاء الرتبة «${r.name}» وتسليمها لـ ${r.username}؟ سيُغلق التذكرة بعدها.`, yes: 'موافقة وإنشاء' })) {
+    e.target.closest('button').disabled = true;
+    const res = await api(`/api/reviews/${a}/approve`, { method: 'POST' });
+    toast(res.delivered ? 'تم إنشاء الرتبة وتسليمها' : 'وافقت، لكن التسليم فشل — راجع التذكرة (زر إعادة المنح)', res.delivered ? 'ok' : 'error');
+    await loadReviews();
+  }
+  if (x) {
+    const reason = await ask({ title: 'رفض الرتبة', text: 'سبب الرفض (يظهر للعميل في التذكرة، اختياري):', yes: 'رفض', danger: true, input: { value: '', placeholder: 'مثال: الاسم غير مناسب' } });
+    if (reason === null) return;
+    await api(`/api/reviews/${x}/reject`, { method: 'POST', body: { reason } });
+    toast('تم الرفض وإبلاغ العميل'); await loadReviews();
+  }
+});
 
 // ---------- الاشتراكات ----------
 let subs = [];
