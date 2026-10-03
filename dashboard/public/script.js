@@ -26,7 +26,7 @@ async function api(path, opts = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
-  if (!res.ok) throw new Error(data.error || 'حدث خطأ');
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
@@ -53,7 +53,10 @@ async function init() {
       ? `<img alt="" src="https://cdn.discordapp.com/avatars/${esc(me.id)}/${esc(me.avatar)}.png?size=64">`
       : esc(me.name.slice(0, 1));
     show('overview');
-  } catch { /* showLogin تم استدعاؤها */ }
+  } catch (e) {
+    // لا تترك الصفحة فارغة إذا فشل /api/me لأي سبب غير 401 (مثل 500/503 أو مشكلة شبكة).
+    showLogin();
+  }
 }
 
 $('#logout').onclick = run(async () => { await api('/auth/logout', { method: 'POST' }); location.href = '/'; });
