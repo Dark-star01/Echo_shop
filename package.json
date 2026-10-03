@@ -1,21 +1,24 @@
 {
   "name": "echo-shop",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "description": "Echo Shop — Discord role shop with ticket system and web dashboard",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "test": "node test/payments.test.js && node test/flows.test.js && node test/dashboard.test.js",
+    "check": "node --check index.js && node --check dashboard/server.js"
   },
   "dependencies": {
-    "discord.js": "^14.18.0",
+    "discord.js": "^14.25.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "@supabase/supabase-js": "^2.45.4",
-    "probot-credits-transfer": "^1.0.2",
-    "bcrypt": "^6.0.0"
+    "@supabase/supabase-js": "^2.45.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

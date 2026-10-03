@@ -1,162 +1,169 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Echo Shop | لوحة التحكم</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Echo Shop — لوحة التحكم</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <!-- ============================================================
-         🔐 شاشة تسجيل الدخول
-    ============================================================= -->
-    <div id="login-screen">
-        <div class="login-card">
-            <div class="brand">
-                <div class="brand-emblem">E</div>
-                <h1 class="brand-title">ECHO <span>SHOP</span></h1>
-                <p class="brand-sub">لوحة التحكم الإدارية</p>
-            </div>
+<main id="login" class="login" hidden>
+  <div class="login-box">
+    <h1>Echo Shop</h1>
+    <p>لوحة تحكم المتجر. الدخول للمشرفين فقط.</p>
+    <p id="loginError" class="err" hidden></p>
+    <a class="btn primary big" href="/auth/login">الدخول بحساب ديسكورد</a>
+  </div>
+</main>
 
-            <form id="loginForm">
-                <div class="form-group">
-                    <label>اسم المستخدم</label>
-                    <input type="text" id="loginUsername" autocomplete="username" required>
-                </div>
-                <div class="form-group">
-                    <label>كلمة المرور</label>
-                    <input type="password" id="loginPassword" autocomplete="current-password" required>
-                </div>
-                <div id="loginError" class="login-error hidden">❌ بيانات الدخول غير صحيحة</div>
-                <button type="submit" id="loginBtn">دخول 🔑</button>
-            </form>
-            <p class="login-note">🔒 لأمانك: ستحتاج لتسجيل الدخول من جديد عند أي تحديث للصفحة</p>
-        </div>
+<div id="app" class="app" hidden>
+  <aside class="side">
+    <div class="brand">Echo Shop</div>
+    <nav id="nav">
+      <button data-view="overview" class="active"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg><span>نظرة عامة</span></button>
+      <button data-view="products"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg><span>المنتجات</span></button>
+      <button data-view="coupons"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg><span>الكوبونات</span></button>
+      <button data-view="orders"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>الطلبات</span> <span id="attBadge" class="badge warn" hidden></span></button>
+      <button data-view="subs"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>الاشتراكات</span></button>
+      <button data-view="settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>الإعدادات</span></button>
+    </nav>
+    <div class="user">
+      <span id="avatar" class="avatar"></span>
+      <span id="userName"></span>
+      <button id="logout" class="link">تسجيل الخروج</button>
     </div>
+  </aside>
 
-    <!-- ============================================================
-         🛒 التطبيق الرئيسي
-    ============================================================= -->
-    <div id="app" class="hidden">
-        <div class="container">
+  <main class="content">
+    <section id="v-overview">
+      <h2>نظرة عامة</h2>
+      <div id="attention" class="alert" hidden></div>
+      <div class="strip" id="stats"></div>
+      <h3>إيرادات آخر 14 يوم</h3>
+      <div class="chart" id="chart"></div>
+      <h3>آخر الطلبات</h3>
+      <div class="table-wrap"><table id="recent"></table></div>
+    </section>
 
-            <header>
-                <div class="header-brand">
-                    <div class="brand-emblem small">E</div>
-                    <div>
-                        <h1>ECHO <span>SHOP</span></h1>
-                        <p class="header-sub">لوحة التحكم</p>
-                    </div>
-                </div>
+    <section id="v-products" hidden>
+      <div class="head">
+        <h2>المنتجات</h2>
+        <input id="search" type="search" placeholder="ابحث بالاسم أو معرف الرتبة">
+        <button id="refreshShop" class="btn" title="يعدّل رسالة المتجر في ديسكورد">تحديث إمبد المتجر</button>
+        <button id="addBtn" class="btn primary">منتج جديد</button>
+      </div>
+      <div class="table-wrap"><table id="productsTable"></table></div>
+    </section>
 
-                <div class="header-actions">
-                    <div class="stat-pill">
-                        <span class="stat-label">المنتجات</span>
-                        <span class="stat-value" id="productCount">0</span>
-                    </div>
-                    <div class="stat-pill">
-                        <span class="stat-label">عمليات ناجحة</span>
-                        <span class="stat-value success" id="successCount">0</span>
-                    </div>
-                    <button id="logoutBtn" class="logout-btn" title="تسجيل الخروج">🚪 خروج</button>
-                </div>
-            </header>
+    <section id="v-coupons" hidden>
+      <div class="head">
+        <h2>الكوبونات</h2>
+        <button id="addCoupon" class="btn primary">كوبون جديد</button>
+      </div>
+      <div class="table-wrap"><table id="couponsTable"></table></div>
+    </section>
 
-            <nav class="tabs">
-                <button class="tab-btn active" data-tab="products">📋 المنتجات</button>
-                <button class="tab-btn" data-tab="add-product">➕ إضافة منتج</button>
-                <button class="tab-btn" data-tab="logs">🧾 سجل المدفوعات</button>
-            </nav>
+    <section id="v-orders" hidden>
+      <div class="head">
+        <h2>الطلبات</h2>
+        <input id="orderSearch" type="search" placeholder="ابحث بالعميل أو المنتج أو رقم الطلب">
+        <select id="orderFilter">
+          <option value="all">كل الطلبات</option>
+          <option value="attention">تحتاج تدخل فقط</option>
+        </select>
+      </div>
+      <div class="table-wrap"><table id="ordersTable"></table></div>
+    </section>
 
-            <section id="products-container" class="tab-panel active">
-                <div class="panel-head">
-                    <h2>💎 قائمة المنتجات</h2>
-                    <input type="text" id="productSearch" class="search-box" placeholder="🔍 ابحث باسم المنتج...">
-                </div>
-                <div id="products"><div class="loader">جاري التحميل...</div></div>
-            </section>
+    <section id="v-subs" hidden>
+      <div class="head">
+        <h2>الاشتراكات</h2>
+        <select id="subFilter">
+          <option value="active">الفعّالة فقط</option>
+          <option value="all">الكل</option>
+        </select>
+      </div>
+      <p class="hint">الاشتراك يُنشأ تلقائياً عند شراء منتج له «مدة اشتراك»، والبوت يسحب الرتبة عند الانتهاء.</p>
+      <div class="table-wrap"><table id="subsTable"></table></div>
+    </section>
 
-            <section id="add-product-container" class="tab-panel">
-                <h2>➕ إضافة منتج جديد</h2>
-                <form id="addProductForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>معرف الرتبة (Role ID)</label>
-                            <input type="text" id="role_id" placeholder="مثال: 123456789012345678" required>
-                        </div>
-                        <div class="form-group">
-                            <label>اسم المنتج</label>
-                            <input type="text" id="name" placeholder="مثال: رتبة VIP" required>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>السعر (كريديت)</label>
-                            <input type="number" id="price" placeholder="مثال: 1000000" required>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>وصف المنتج</label>
-                        <input type="text" id="description" placeholder="وصف مختصر عن الرتبة">
-                    </div>
-                    <div class="form-group">
-                        <label>المميزات (كل سطر مميزة منفصلة)</label>
-                        <textarea id="features" placeholder="مميزة 1&#10;مميزة 2&#10;مميزة 3" rows="4"></textarea>
-                    </div>
-                    <button type="submit">💎 إضافة المنتج</button>
-                </form>
-            </section>
+    <section id="v-settings" hidden>
+      <h2>الإعدادات</h2>
+      <form id="settingsForm" class="panel">
+        <h3>طريقة الدفع</h3>
+        <label class="opt"><input type="radio" name="mode" value="calculated">
+          <span><b>البوت يحسب الضريبة</b><small>يعرض للعميل المبلغ بعد إضافة ضريبة ProBot، مثل <code>C @bank 1053</code></small></span></label>
+        <label class="opt"><input type="radio" name="mode" value="with_tax">
+          <span><b>العميل يكتب with tax</b><small>يعرض السعر فقط مع الكلمة، مثل <code>C @bank 1000 with tax</code>، وProBot يضيف الضريبة</small></span></label>
+        <label id="taxRow" class="field">نسبة ضريبة ProBot (%)
+          <input name="tax" type="number" min="0" max="49" step="0.1"></label>
+        <h3>الرتب القابلة للإنشاء</h3>
+        <label class="field">معرف رتبة المرجع (الرتب الجديدة تُنشأ تحتها مباشرة)
+          <input name="reference" inputmode="numeric" placeholder="اتركه فارغاً حتى تحدده — بدونه لا تُباع الرتب القابلة للإنشاء"></label>
+        <h3>اللوق والنسخ</h3>
+        <label class="field">معرف روم لوق الستاف (شراء، إنشاء رتب، أخطاء)
+          <input name="log_channel" inputmode="numeric" placeholder="فارغ = بدون لوق"></label>
+        <label class="field">معرف روم نسخ التذاكر (ملف نصي عند إغلاق كل تذكرة)
+          <input name="transcript_channel" inputmode="numeric" placeholder="فارغ = بدون نسخ"></label>
+        <label class="field">معرف روم تنبيهات الأخطاء (فارغ = يستخدم روم اللوق)
+          <input name="alert_channel" inputmode="numeric" placeholder="فارغ = روم اللوق"></label>
+        <label class="field">إغلاق التذاكر الخاملة تلقائياً بعد كم ساعة (0 = معطل)
+          <input name="idle_hours" type="number" min="0" max="720" value="24"></label>
+        <button class="btn primary" type="submit">حفظ الإعدادات</button>
+      </form>
+    </section>
+  </main>
+</div>
 
-            <section id="logs-container" class="tab-panel">
-                <div class="panel-head">
-                    <h2>🧾 سجل محاولات الدفع</h2>
-                    <button id="refreshLogsBtn" class="secondary-btn">🔄 تحديث</button>
-                </div>
-                <div id="logs"><div class="loader">جاري التحميل...</div></div>
-            </section>
-
-        </div>
+<dialog id="productDialog">
+  <form id="productForm" method="dialog">
+    <h3 id="dialogTitle">منتج جديد</h3>
+    <input type="hidden" name="id">
+    <label class="field">نوع المنتج
+      <select name="type"><option value="fixed">رتبة جاهزة</option><option value="custom">رتبة قابلة للإنشاء (العميل يصممها)</option></select></label>
+    <label class="field" id="roleField">معرف الرتبة<input name="role_id" inputmode="numeric" placeholder="123456789012345678"></label>
+    <label class="field">اسم المنتج<input name="name" required maxlength="100"></label>
+    <label class="field">السعر (كريديت)<input name="price" type="number" min="1" step="1" required></label>
+    <label class="field" id="durationField">مدة الاشتراك بالأيام (فارغ = دائم)<input name="duration_days" type="number" min="1" max="3650"></label>
+    <label class="field">الوصف<textarea name="description" rows="2" maxlength="500"></textarea></label>
+    <label class="field">المميزات (كل سطر مميزة)<textarea name="features" rows="4" maxlength="1000"></textarea></label>
+    <fieldset id="customFields" hidden>
+      <legend>إعدادات الرتبة القابلة للإنشاء</legend>
+      <div class="field">أنماط الألوان المسموحة<div class="checks" id="modeChecks"></div></div>
+      <label class="check"><input type="checkbox" name="allow_icon"> السماح برفع أيقونة</label>
+      <label class="check"><input type="checkbox" name="require_review"> مراجعة الستاف قبل الإنشاء</label>
+      <label class="field">أقصى طول للاسم<input name="max_name_length" type="number" min="1" max="100" value="32"></label>
+      <label class="field">كلمات ممنوعة في الاسم (مفصولة بفاصلة)<input name="banned_words"></label>
+      <div class="field">الصلاحيات الممنوحة للرتبة<div class="checks" id="permChecks"></div></div>
+      <label class="field">سعر تعديل الرتبة لاحقاً (0 = مجاني)<input name="edit_price" type="number" min="0" value="0"></label>
+      <label class="field">مدة الانتظار بين التعديلات (أيام)<input name="edit_cooldown_days" type="number" min="0" max="365" value="7"></label>
+    </fieldset>
+    <div class="actions">
+      <button type="button" class="btn" id="cancelDialog">إلغاء</button>
+      <button type="submit" class="btn primary">حفظ</button>
     </div>
+  </form>
+</dialog>
 
-    <!-- نافذة التعديل -->
-    <div id="edit-modal" class="modal hidden">
-        <div class="modal-box">
-            <h2>✏️ تعديل المنتج</h2>
-            <form id="editProductForm">
-                <input type="hidden" id="edit_id">
-                <div class="form-group">
-                    <label>معرف الرتبة (Role ID)</label>
-                    <input type="text" id="edit_role_id" required>
-                </div>
-                <div class="form-group">
-                    <label>اسم المنتج</label>
-                    <input type="text" id="edit_name" required>
-                </div>
-                <div class="form-group">
-                    <label>السعر (كريديت)</label>
-                    <input type="number" id="edit_price" required>
-                </div>
-                <div class="form-group">
-                    <label>وصف المنتج</label>
-                    <input type="text" id="edit_description">
-                </div>
-                <div class="form-group">
-                    <label>المميزات</label>
-                    <textarea id="edit_features" rows="4"></textarea>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" id="cancelEditBtn" class="secondary-btn">إلغاء</button>
-                    <button type="submit">💾 حفظ التعديلات</button>
-                </div>
-            </form>
-        </div>
+<dialog id="couponDialog">
+  <form id="couponForm" method="dialog">
+    <h3>كوبون جديد</h3>
+    <label class="field">الكود (فارغ = يُولَّد تلقائياً)<input name="code" maxlength="32" placeholder="SUMMER20"></label>
+    <label class="field">نسبة الخصم % (1–100)<input name="percent" type="number" min="1" max="100" required></label>
+    <label class="field">تاريخ الانتهاء (اختياري)<input name="expires_at" type="datetime-local"></label>
+    <label class="field">أقصى عدد استخدامات للكوبون كله (فارغ = بلا حد)<input name="max_uses" type="number" min="1"></label>
+    <label class="field">أقصى استخدام للشخص الواحد (فارغ = بلا حد)<input name="max_uses_per_user" type="number" min="1" value="1"></label>
+    <div class="actions">
+      <button type="button" class="btn" id="cancelCoupon">إلغاء</button>
+      <button type="submit" class="btn primary">إنشاء</button>
     </div>
+  </form>
+</dialog>
 
-    <div id="toast-container"></div>
-
-    <script src="script.js"></script>
+<div id="toast" class="toast" hidden></div>
+<script src="script.js"></script>
 </body>
 </html>

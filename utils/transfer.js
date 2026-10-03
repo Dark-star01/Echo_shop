@@ -1,8 +1,9 @@
-// utils/transfer.js - مراقبة تحويلات ProBot Credits (نسخة مقاومة لاختلاف الصيغة)
+// utils/transfer.js - مراقبة تحويلات ProBot Credits
 //
-// نبني نص بحث موحّد يجمع محتوى الرسالة العادي + كل نصوص أي embed مرفق،
-// لأن بعض البوتات (زي ProBot) ترسل التفاصيل داخل embed مو بالنص المباشر.
-// وبنطابق منشن المستخدم بصيغتين <@id> و <@!id> لأن ديسكورد يستخدم الاثنين.
+// نبني نص بحث موحّد يجمع محتوى الرسالة + كل نصوص أي embed مرفق (ProBot يرسل أحيانًا بالـ embed)،
+// ونطابق منشن المستخدم بصيغتين <@id> و <@!id>.
+
+const MENTION_REGEX = /<@!?(\d+)>/g;
 
 function extractSearchableText(message) {
     const parts = [message.content || ''];
@@ -26,7 +27,7 @@ function mentionsUser(text, userId) {
 }
 
 function extractAmount(text) {
-    // 1) أي رقم داخل باكتيك `...` بغض النظر عن مكان علامة $ (قبل أو بعد الرقم)
+    // 1) أي رقم داخل باكتيك `...` بغض النظر عن مكان علامة $
     const backtickMatches = [...text.matchAll(/`([^`]+)`/g)];
     for (const m of backtickMatches) {
         const digits = m[1].replace(/[^\d]/g, '');
@@ -35,7 +36,7 @@ function extractAmount(text) {
             if (!isNaN(num)) return num;
         }
     }
-    // 2) احتياطي: $1000 أو 1000$ بدون باكتيك، أو "1000 كريديت"
+    // 2) احتياطي: $1000 أو 1000$ أو "1000 كريديت"
     const fallbackPatterns = [
         /\$\s*([\d,]+)/,
         /([\d,]+)\s*\$/,
@@ -52,63 +53,110 @@ function extractAmount(text) {
 }
 
 /**
- * @param {Object} options
- * @param {string} options.botId - معرف بوت ProBot
- * @param {string} options.userId - معرف حساب البنك (المستلم)
- * @param {number} options.amount - المبلغ المطلوب بالضبط (الصافي)
- * @param {number} options.timeout - مدة الانتظار (مللي ثانية)
- * @param {TextChannel} options.channel - قناة التذكرة
- * @returns {Promise<{status: 'success'|'underpaid'|'overpaid'|'timeout', actualAmount: number|null}>}
+ * يقيّم المبلغ الفعلي مقابل المطلوب.
+ * success: المبلغ >= المطلوب وضمن هامش التقريب (maxAmount) فقط.
  */
-async function monitorTransferDetailed({ botId, userId, amount, timeout, channel }) {
-    // 🔍 لوق تشخيصي: يسجل أي رسالة توصل من ProBot بالتكت (نص + embed) بغض النظر عن الفلتر
-    const debugListener = (message) => {
-        if (message.channel.id === channel.id && message.author.id === botId) {
-            const text = extractSearchableText(message);
-            console.log('🔍 [DEBUG-RAW] رسالة من ProBot بالتكت:');
-            console.log('content:', message.content || '(فاضي)');
-            console.log('embeds:', JSON.stringify(message.embeds, null, 2));
-            console.log('النص الموحّد للبحث:', text);
-            console.log(`يحتوي على منشن <@${userId}>؟`, mentionsUser(text, userId));
-            console.log(`المبلغ المستخرج:`, extractAmount(text));
-            console.log('------------------------------------');
-        }
-    };
-    channel.client.on('messageCreate', debugListener);
-    setTimeout(() => channel.client.off('messageCreate', debugListener), timeout + 2000);
+function evaluateAmount(actual, amount, maxAmount = amount) {
+    if (actual === null || actual === undefined) return 'timeout';
+    if (actual >= amount && actual <= Math.max(maxAmount, amount)) return 'success';
+    return actual < amount ? 'underpaid' : 'overpaid';
+}
 
+/**
+ * هل التحويل يخص صاحب التذكرة؟
+ * صيغة رسالة ProBot ما تكون دائمًا بمنشن، فنرفض فقط لو فيه دليل واضح إنها لشخص ثاني:
+ *  - منشن لشخص غير صاحب التذكرة وغير البنك
+ *  - أو الرسالة رد على رسالة إنسان غير صاحب التذكرة
+ */
+function isPaymentFromPayer(message, text, payerId, bankUserId) {
+    const ids = [...text.matchAll(MENTION_REGEX)].map(m => m[1]);
+    if (ids.includes(payerId)) return true;
+
+    const others = ids.filter(id => id !== bankUserId && id !== message.author.id);
+    if (others.length > 0) return false;
+
+    const refId = message.reference?.messageId;
+    if (refId) {
+        const refMsg = message.channel?.messages?.cache?.get(refId);
+        if (refMsg && !refMsg.author.bot && refMsg.author.id !== payerId) return false;
+    }
+    return true;
+}
+
+function isCandidateMessage({ message, botId, userId, payerId }) {
+    if (message.author.id !== botId) return false;
+    const text = extractSearchableText(message);
+    return mentionsUser(text, userId)
+        && extractAmount(text) !== null
+        && isPaymentFromPayer(message, text, payerId, userId);
+}
+
+/**
+ * يراقب القناة حتى يوصل تحويل ProBot مناسب أو ينتهي الوقت أو تنحذف القناة.
+ * @returns {Promise<{status: 'success'|'underpaid'|'overpaid'|'timeout'|'cancelled', actualAmount: number|null}>}
+ */
+function monitorTransferDetailed({ botId, userId, payerId, amount, maxAmount = amount, timeout, channel }) {
     return new Promise((resolve) => {
-        const collector = channel.createMessageCollector({
-            filter: (message) => {
-                if (message.author.id !== botId) return false;
+        let settled = false;
+
+        // 🔍 لوق تشخيصي اختياري: DEBUG_TRANSFERS=true
+        let debugListener = null;
+        if (process.env.DEBUG_TRANSFERS === 'true') {
+            debugListener = (message) => {
+                if (message.channel.id !== channel.id || message.author.id !== botId) return;
                 const text = extractSearchableText(message);
-                return mentionsUser(text, userId) && extractAmount(text) !== null;
-            },
+                console.log('🔍 [DEBUG] رسالة ProBot:', JSON.stringify({
+                    text,
+                    mentionsBank: mentionsUser(text, userId),
+                    amount: extractAmount(text),
+                    fromPayer: isPaymentFromPayer(message, text, payerId, userId),
+                }));
+            };
+            channel.client.on('messageCreate', debugListener);
+        }
+
+        const collector = channel.createMessageCollector({
+            filter: (message) => isCandidateMessage({ message, botId, userId, payerId }),
             time: timeout,
             max: 1,
         });
 
         collector.on('collect', (message) => {
-            const text = extractSearchableText(message);
-            const actualAmount = extractAmount(text);
-
-            if (actualAmount === amount) {
-                resolve({ status: 'success', actualAmount });
-            } else if (actualAmount === null) {
-                resolve({ status: 'timeout', actualAmount: null });
-            } else if (actualAmount < amount) {
-                resolve({ status: 'underpaid', actualAmount });
-            } else {
-                resolve({ status: 'overpaid', actualAmount });
-            }
+            settled = true;
+            const actualAmount = extractAmount(extractSearchableText(message));
+            resolve({ status: evaluateAmount(actualAmount, amount, maxAmount), actualAmount });
         });
 
-        collector.on('end', (collected, reason) => {
-            if (reason === 'time') {
-                resolve({ status: 'timeout', actualAmount: null });
-            }
+        collector.on('end', (_collected, reason) => {
+            if (debugListener) channel.client.off('messageCreate', debugListener);
+            if (settled) return;
+            settled = true;
+            // 'time' = انتهت المهلة، غيرها (مثل channelDelete) = انحذفت القناة/توقف المراقب
+            resolve({ status: reason === 'time' ? 'timeout' : 'cancelled', actualAmount: null });
         });
     });
 }
 
-module.exports = { monitorTransferDetailed };
+/**
+ * يفحص آخر رسائل القناة بحثًا عن تحويل وصل أثناء توقف البوت (للاستعادة بعد إعادة التشغيل).
+ * @returns {Promise<{actualAmount: number}|null>}
+ */
+async function findTransferInHistory({ channel, botId, userId, payerId, since, limit = 50 }) {
+    const messages = await channel.messages.fetch({ limit });
+    const candidates = [...messages.values()]
+        .filter(m => m.createdTimestamp >= since && isCandidateMessage({ message: m, botId, userId, payerId }))
+        .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+    if (candidates.length === 0) return null;
+    return { actualAmount: extractAmount(extractSearchableText(candidates[0])) };
+}
+
+module.exports = {
+    extractSearchableText,
+    extractAmount,
+    mentionsUser,
+    evaluateAmount,
+    isPaymentFromPayer,
+    isCandidateMessage,
+    monitorTransferDetailed,
+    findTransferInHistory,
+};

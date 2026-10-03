@@ -1,38 +1,51 @@
 // utils/helpers.js - دوال مساعدة
 
-/**
- * تنسيق الأرقام إلى صيغة عملة
- */
 function formatCurrency(amount) {
-    return amount.toLocaleString();
+    return Number(amount).toLocaleString();
 }
 
 /**
- * حساب المبلغ الإجمالي مع الضريبة
+ * المبلغ الذي يجب على العميل تحويله ليصل الصافي المطلوب بعد ضريبة ProBot.
+ * (1e-9 لتفادي أخطاء الفاصلة العائمة اللي تزيد المبلغ 1 بالغلط)
  */
-function calculateTotal(price, taxPercent = 5) {
-    const tax = Math.round((price * taxPercent) / 100);
-    return { price, tax, total: price + tax };
+function calculateSendAmount(netAmount, taxPercent = 0) {
+    const tax = Number(taxPercent) || 0;
+    if (tax <= 0) return netAmount;
+    if (tax >= 100) throw new Error('PROBOT_TAX_PERCENT يجب أن تكون أقل من 100');
+    return Math.ceil(netAmount / (1 - tax / 100) - 1e-9);
 }
 
 /**
- * التحقق من صحة معرف الرتبة
+ * أعلى صافي ممكن يوصل لو العميل حوّل sendAmount (هامش التقريب فقط).
  */
+function calculateMaxNet(sendAmount, taxPercent = 0) {
+    const tax = Number(taxPercent) || 0;
+    if (tax <= 0) return sendAmount;
+    return Math.floor(sendAmount * (1 - tax / 100) + 1e-9);
+}
+
 function isValidRoleId(id) {
-    return /^\d{17,20}$/.test(id);
+    return /^\d{17,20}$/.test(String(id ?? ''));
 }
 
-/**
- * تحويل النص إلى قائمة مميزات (array)
- */
 function parseFeatures(text) {
     if (!text) return [];
     return text.split('\n').filter(line => line.trim());
 }
 
+function formatDuration(ms) {
+    const minutes = Math.round(ms / 60000);
+    if (minutes <= 1) return 'دقيقة';
+    if (minutes === 2) return 'دقيقتين';
+    if (minutes <= 10) return `${minutes} دقائق`;
+    return `${minutes} دقيقة`;
+}
+
 module.exports = {
     formatCurrency,
-    calculateTotal,
+    calculateSendAmount,
+    calculateMaxNet,
     isValidRoleId,
     parseFeatures,
+    formatDuration,
 };

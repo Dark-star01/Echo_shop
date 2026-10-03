@@ -1,300 +1,290 @@
-// dashboard/public/script.js
-const API_BASE = '/api';
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const date = (d) => new Date(d).toLocaleString('ar-SA', { dateStyle: 'short', timeStyle: 'short' });
 
-// ============================================================
-//  🔐 الجلسة المؤقتة (بالذاكرة فقط)
-//  ملاحظة: هذا المتغيّر يتصفّر تلقائيًا مع أي تحديث/إغلاق للصفحة
-//  لأن كل السكربت يعاد تحميله من الصفر — يعني ما فيه "تذكرني"
-// ============================================================
-let authHeader = null;
-
-function showLogin(errorMsg) {
-    authHeader = null;
-    document.getElementById('app').classList.add('hidden');
-    document.getElementById('login-screen').classList.remove('hidden');
-    const errBox = document.getElementById('loginError');
-    if (errorMsg) {
-        errBox.textContent = errorMsg;
-        errBox.classList.remove('hidden');
-    } else {
-        errBox.classList.add('hidden');
-    }
-    document.getElementById('loginPassword').value = '';
-}
-
-function showApp() {
-    document.getElementById('login-screen').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
-}
-
-// كل نداءات الـ API تمر من هنا عشان نرفق التوثيق ونتعامل مع انتهاء الجلسة
-async function apiFetch(path, options = {}) {
-    const headers = { ...(options.headers || {}), Authorization: authHeader };
-    const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-    if (res.status === 401) {
-        showLogin('❌ انتهت الجلسة، الرجاء تسجيل الدخول من جديد');
-        throw new Error('Unauthorized');
-    }
-    return res;
-}
-
-document.getElementById('loginForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const username = document.getElementById('loginUsername').value.trim();
-    const password = document.getElementById('loginPassword').value;
-    const btn = document.getElementById('loginBtn');
-
-    btn.disabled = true;
-    btn.textContent = 'جاري التحقق...';
-
-    try {
-        const res = await fetch(`${API_BASE}/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
-        });
-        const data = await res.json();
-
-        if (res.ok && data.success) {
-            authHeader = 'Basic ' + btoa(`${username}:${password}`);
-            showApp();
-            initDashboard();
-        } else {
-            // رسالة دقيقة: لو اليوزر غلط "بيانات الدخول غير صحيحة" (بدون كشف تفاصيل)
-            // لو اليوزر صح بس الباسورد غلط: "كلمة المرور غير صحيحة" تحديدًا
-            showLogin(`❌ ${data.message || 'بيانات الدخول غير صحيحة'}`);
-        }
-    } catch (error) {
-        showLogin('❌ تعذر الاتصال بالخادم، حاول مرة أخرى');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'دخول 🔑';
-    }
-});
-
-document.getElementById('logoutBtn').addEventListener('click', () => {
-    showLogin();
-});
-
-// ============================================================
-//  🔔 نظام تنبيهات (Toast) بدل alert()
-// ============================================================
-function toast(message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    const el = document.createElement('div');
-    el.className = `toast ${type}`;
-    el.textContent = message;
-    container.appendChild(el);
-    setTimeout(() => el.remove(), 3500);
-}
-
-// ============================================================
-//  🗂️ التبويبات
-// ============================================================
-document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById(`${btn.dataset.tab}-container`).classList.add('active');
-    });
-});
-
-// ============================================================
-//  💎 المنتجات
-// ============================================================
-let allProducts = [];
-
-async function loadProducts() {
-    try {
-        const res = await apiFetch('/products');
-        if (!res.ok) throw new Error('Failed to fetch products');
-        allProducts = await res.json();
-        renderProducts(allProducts);
-        document.getElementById('productCount').textContent = allProducts.length;
-    } catch (error) {
-        if (error.message !== 'Unauthorized') {
-            document.getElementById('products').innerHTML = '<div class="empty-message">❌ خطأ في تحميل المنتجات</div>';
-        }
-    }
-}
-
-function renderProducts(products) {
-    const container = document.getElementById('products');
-    if (!products || products.length === 0) {
-        container.innerHTML = '<div class="empty-message">📭 لا توجد منتجات حالياً</div>';
-        return;
-    }
-
-    container.innerHTML = products.map(p => `
-        <div class="product" data-id="${p.id}">
-            <div class="info">
-                <h3>💎 ${escapeHtml(p.name)}</h3>
-                <div class="price">${Number(p.price).toLocaleString()} كريديت</div>
-                ${p.description ? `<div class="desc">📝 ${escapeHtml(p.description)}</div>` : ''}
-                ${p.features ? `<div class="features">✨ ${escapeHtml(p.features)}</div>` : ''}
-                <div class="meta">🎭 رتبة: <code>${p.role_id}</code> &nbsp;|&nbsp; #${p.id}</div>
-            </div>
-            <div class="actions">
-                <button class="edit-btn" onclick="openEditModal(${p.id})">✏️ تعديل</button>
-                <button class="delete-btn" onclick="deleteProduct(${p.id})">🗑️ حذف</button>
-            </div>
-        </div>
-    `).join('');
-}
-
-function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
-document.getElementById('productSearch').addEventListener('input', (e) => {
-    const q = e.target.value.trim().toLowerCase();
-    const filtered = allProducts.filter(p => p.name.toLowerCase().includes(q));
-    renderProducts(filtered);
-});
-
-async function deleteProduct(id) {
-    if (!confirm('⚠️ هل أنت متأكد من حذف هذا المنتج؟')) return;
-    try {
-        const res = await apiFetch(`/products/${id}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error('Failed to delete');
-        toast('🗑️ تم حذف المنتج بنجاح', 'success');
-        await loadProducts();
-    } catch (error) {
-        if (error.message !== 'Unauthorized') toast('❌ فشل حذف المنتج', 'error');
-    }
-}
-
-// ------- إضافة منتج -------
-document.getElementById('addProductForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const data = {
-        role_id: document.getElementById('role_id').value.trim(),
-        name: document.getElementById('name').value.trim(),
-        price: parseInt(document.getElementById('price').value),
-        description: document.getElementById('description').value.trim(),
-        features: document.getElementById('features').value.trim(),
-    };
-
-    if (!data.role_id || !data.name || isNaN(data.price) || data.price <= 0) {
-        toast('❌ الرجاء ملء جميع الحقول المطلوبة بشكل صحيح', 'error');
-        return;
-    }
-
-    try {
-        const res = await apiFetch('/products', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-        });
-        if (!res.ok) throw new Error('Failed to add product');
-        document.getElementById('addProductForm').reset();
-        toast('✅ تمت إضافة المنتج بنجاح', 'success');
-        await loadProducts();
-        document.querySelector('.tab-btn[data-tab="products"]').click();
-    } catch (error) {
-        if (error.message !== 'Unauthorized') toast('❌ فشل إضافة المنتج', 'error');
-    }
-});
-
-// ------- تعديل منتج -------
-function openEditModal(id) {
-    const p = allProducts.find(x => x.id === id);
-    if (!p) return;
-    document.getElementById('edit_id').value = p.id;
-    document.getElementById('edit_role_id').value = p.role_id;
-    document.getElementById('edit_name').value = p.name;
-    document.getElementById('edit_price').value = p.price;
-    document.getElementById('edit_description').value = p.description || '';
-    document.getElementById('edit_features').value = p.features || '';
-    document.getElementById('edit-modal').classList.remove('hidden');
-}
-
-document.getElementById('cancelEditBtn').addEventListener('click', () => {
-    document.getElementById('edit-modal').classList.add('hidden');
-});
-
-document.getElementById('editProductForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const id = document.getElementById('edit_id').value;
-    const data = {
-        role_id: document.getElementById('edit_role_id').value.trim(),
-        name: document.getElementById('edit_name').value.trim(),
-        price: parseInt(document.getElementById('edit_price').value),
-        description: document.getElementById('edit_description').value.trim(),
-        features: document.getElementById('edit_features').value.trim(),
-    };
-
-    try {
-        const res = await apiFetch(`/products/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-        });
-        if (!res.ok) throw new Error('Failed to update');
-        toast('✅ تم حفظ التعديلات', 'success');
-        document.getElementById('edit-modal').classList.add('hidden');
-        await loadProducts();
-    } catch (error) {
-        if (error.message !== 'Unauthorized') toast('❌ فشل حفظ التعديلات', 'error');
-    }
-});
-
-// ============================================================
-//  🧾 سجل محاولات الدفع
-// ============================================================
-const STATUS_LABELS = {
-    success: '✅ نجاح',
-    underpaid: '🔻 مبلغ أقل',
-    overpaid: '🔺 مبلغ أكثر',
-    timeout: '⏱️ انتهت المهلة',
+const STATUS = {
+  completed: ['مكتمل', 'ok'], paid: ['مدفوع', 'ok'], awaiting_payment: ['بانتظار الدفع', 'info'],
+  role_failed: ['يحتاج تدخل', 'warn'], error: ['خطأ', 'warn'], failed: ['مبلغ خاطئ', 'bad'],
+  expired: ['منتهي', 'muted'], active: ['فعال', 'ok'], removal_failed: ['فشل السحب', 'warn'], cancelled: ['ملغي', 'muted'], closed_manually: ['أُغلق يدوياً', 'muted'],
 };
+const NEEDS_ATTENTION = ['role_failed', 'error'];
 
-async function loadLogs() {
-    try {
-        const res = await apiFetch('/logs');
-        if (!res.ok) throw new Error('Failed to fetch logs');
-        const logs = await res.json();
-        renderLogs(logs);
-        document.getElementById('successCount').textContent = logs.filter(l => l.status === 'success').length;
-    } catch (error) {
-        if (error.message !== 'Unauthorized') {
-            document.getElementById('logs').innerHTML = '<div class="empty-message">❌ خطأ في تحميل السجل</div>';
-        }
-    }
+let products = [], orders = [], config = null;
+
+function toast(msg, type = 'ok') {
+  const t = $('#toast');
+  t.textContent = msg; t.className = `toast ${type}`; t.hidden = false;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.hidden = true), 3500);
 }
 
-function renderLogs(logs) {
-    const container = document.getElementById('logs');
-    if (!logs || logs.length === 0) {
-        container.innerHTML = '<div class="empty-message">📭 لا توجد محاولات مسجلة بعد</div>';
-        return;
-    }
-
-    container.innerHTML = logs.map(l => `
-        <div class="product">
-            <div class="info">
-                <h3><span class="status-badge status-${l.status}">${STATUS_LABELS[l.status] || l.status}</span> &nbsp;${escapeHtml(l.product_name || 'غير معروف')}</h3>
-                <div class="desc">👤 ${escapeHtml(l.username || l.user_id)} &nbsp;|&nbsp; 🎫 ${escapeHtml(l.ticket_name || '-')}</div>
-                <div class="desc">💰 المطلوب: ${Number(l.required_amount).toLocaleString()} &nbsp;|&nbsp; المحوّل فعليًا: ${l.actual_amount != null ? Number(l.actual_amount).toLocaleString() : 'لا يوجد'}</div>
-                <div class="meta">🕒 ${new Date(l.created_at).toLocaleString('ar-SA')}</div>
-            </div>
-        </div>
-    `).join('');
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json' },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
+  if (!res.ok) throw new Error(data.error || 'حدث خطأ');
+  return data;
 }
 
-document.getElementById('refreshLogsBtn').addEventListener('click', loadLogs);
+const run = (fn) => async (...a) => { try { await fn(...a); } catch (e) { if (e.message !== 'unauthorized') toast(e.message, 'error'); } };
 
-// ============================================================
-//  🚀 تشغيل لوحة التحكم بعد تسجيل الدخول بنجاح
-// ============================================================
-function initDashboard() {
-    loadProducts();
-    loadLogs();
+// ---------- الدخول ----------
+function showLogin() {
+  $('#app').hidden = true; $('#login').hidden = false;
+  const err = new URLSearchParams(location.search).get('error');
+  const msgs = {
+    forbidden: 'حسابك لا يملك الرتبة المطلوبة للدخول.',
+    failed: 'فشل تسجيل الدخول، حاول مرة أخرى.',
+    setup: 'الداشبورد غير مُعدّ بعد (راجع إعدادات OAuth في ملف .env).',
+  };
+  if (msgs[err]) { $('#loginError').textContent = msgs[err]; $('#loginError').hidden = false; }
 }
 
-// عند تحميل الصفحة لأول مرة: تظهر شاشة الدخول دائمًا (لا يوجد تذكرني)
-showLogin();
+async function init() {
+  try {
+    const me = await api('/api/me');
+    $('#login').hidden = true; $('#app').hidden = false;
+    $('#userName').textContent = me.name;
+    $('#avatar').innerHTML = me.avatar
+      ? `<img alt="" src="https://cdn.discordapp.com/avatars/${esc(me.id)}/${esc(me.avatar)}.png?size=64">`
+      : esc(me.name.slice(0, 1));
+    show('overview');
+  } catch { /* showLogin تم استدعاؤها */ }
+}
+
+$('#logout').onclick = run(async () => { await api('/auth/logout', { method: 'POST' }); location.href = '/'; });
+
+// ---------- التنقل ----------
+$('#nav').onclick = (e) => { const v = e.target.closest('button')?.dataset.view; if (v) show(v); };
+
+const show = run(async (view) => {
+  document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+  document.querySelectorAll('main.content > section').forEach((s) => (s.hidden = s.id !== `v-${view}`));
+  document.querySelectorAll('.table-wrap table').forEach((t) => (t.innerHTML = '<tr><td class="loading">جارِ التحميل…</td></tr>'));
+  await ({ overview: loadOverview, products: loadProducts, orders: loadOrders, settings: loadSettings, coupons: loadCoupons, subs: loadSubs })[view]();
+});
+
+const statusBadge = (s) => { const [label, cls] = STATUS[s] || [s, 'muted']; return `<span class="badge ${cls}">${esc(label)}</span>`; };
+
+function ordersRows(list) {
+  if (!list.length) return '<tr><td class="empty">لا توجد طلبات بعد.</td></tr>';
+  return `<thead><tr><th>#</th><th>العميل</th><th>المنتج</th><th>المبلغ</th><th>الحالة</th><th>التاريخ</th></tr></thead><tbody>${
+    list.map((o) => `<tr class="${NEEDS_ATTENTION.includes(o.status) ? 'attn' : ''}">
+      <td>${o.id}</td><td>${esc(o.username)}<span class="sub">${esc(o.user_id)}</span></td>
+      <td>${esc(o.product_name)}</td><td>${fmt(o.required_amount)}</td>
+      <td>${statusBadge(o.status)}${o.error ? `<span class="sub">${esc(o.error)}</span>` : ''}</td>
+      <td>${date(o.created_at)}</td></tr>`).join('')}</tbody>`;
+}
+
+// ---------- نظرة عامة ----------
+async function loadOverview() {
+  const [stats, list] = await Promise.all([api('/api/stats'), api('/api/orders')]);
+  $('#stats').innerHTML = [
+    [fmt(stats.revenue), 'إجمالي الإيرادات'], [fmt(stats.revenueWeek), 'إيرادات آخر 7 أيام'],
+    [fmt(stats.completed), 'طلبات مكتملة'], [fmt(stats.products), 'منتجات'],
+    [fmt(stats.subsActive), 'اشتراكات فعّالة'], [fmt(stats.subsExpiring), 'تنتهي خلال 3 أيام'],
+  ].map(([n, l]) => `<div><b>${n}</b><span>${l}</span></div>`).join('');
+
+  const att = $('#attention'), badge = $('#attBadge');
+  att.hidden = badge.hidden = !stats.attention;
+  badge.textContent = stats.attention;
+  att.innerHTML = `<span>${stats.attention} طلب دُفع ولم تُسلَّم رتبته بعد.</span><button class="btn sm" id="goAttention">عرضها</button>`;
+  if (stats.attention) $('#goAttention').onclick = () => { $('#orderFilter').value = 'attention'; show('orders'); };
+  const max = Math.max(...stats.daily.map((d) => d.total), 1);
+  $('#chart').innerHTML = stats.daily.map((d, i) => `<div class="bar" title="${d.day}: ${fmt(d.total)} كريديت">
+    <i style="height:${Math.round((d.total / max) * 100)}%"></i><span>${i % 2 === 0 ? d.day.slice(8) : '&nbsp;'}</span></div>`).join('');
+  $('#recent').innerHTML = ordersRows(list.slice(0, 8));
+}
+
+// ---------- المنتجات ----------
+async function loadProducts() { products = await api('/api/products'); renderProducts(); }
+
+function renderProducts() {
+  const q = $('#search').value.trim().toLowerCase();
+  const list = products.filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.role_id || '').includes(q));
+  $('#productsTable').innerHTML = list.length
+    ? `<thead><tr><th>المنتج</th><th>الرتبة</th><th>السعر</th><th></th></tr></thead><tbody>${list.map((p) => `<tr>
+        <td>${esc(p.name)}${p.duration_days ? ` <span class="badge muted">${p.duration_days} يوم</span>` : ''}<span class="sub">${esc(p.description)}</span></td>
+        <td>${p.type === 'custom' ? '<span class="badge info">قابلة للإنشاء</span>' : `<code>${esc(p.role_id)}</code>`}</td><td>${fmt(p.price)}</td>
+        <td class="act"><button class="btn sm" data-edit="${p.id}">تعديل</button><button class="btn sm danger" data-del="${p.id}">حذف</button></td></tr>`).join('')}</tbody>`
+    : '<tr><td class="empty">لا توجد منتجات. اضغط «منتج جديد» لإضافة أول منتج.</td></tr>';
+}
+
+$('#search').oninput = renderProducts;
+$('#productsTable').onclick = run(async (e) => {
+  const edit = e.target.dataset.edit, del = e.target.dataset.del;
+  if (edit) openDialog(products.find((p) => p.id == edit));
+  if (del && confirm('حذف هذا المنتج؟ لا يمكن التراجع.')) {
+    await api(`/api/products/${del}`, { method: 'DELETE' });
+    toast('تم حذف المنتج'); await loadProducts();
+  }
+});
+
+const dialog = $('#productDialog'), form = $('#productForm');
+const checks = (name, items, picked) => Object.entries(items).map(([k, label]) =>
+  `<label class="check"><input type="checkbox" name="${name}" value="${k}" ${picked.includes(k) ? 'checked' : ''}> ${esc(label)}</label>`).join('');
+const syncType = () => {
+  const custom = form.elements.type.value === 'custom';
+  $('#customFields').hidden = !custom; $('#roleField').hidden = custom; $('#durationField').hidden = custom;
+  form.elements.role_id.required = !custom;
+};
+form.elements.type.onchange = syncType;
+
+async function openDialog(p) {
+  config ||= await api('/api/custom-config');
+  form.reset();
+  const cs = p?.custom_settings || {};
+  $('#dialogTitle').textContent = p ? 'تعديل المنتج' : 'منتج جديد';
+  for (const k of ['id', 'role_id', 'name', 'price', 'description', 'features']) form.elements[k].value = p?.[k] ?? '';
+  form.elements.type.value = p?.type || 'fixed';
+  form.elements.duration_days.value = p?.duration_days ?? '';
+  $('#modeChecks').innerHTML = checks('color_modes', config.modes, cs.color_modes || ['solid']);
+  $('#permChecks').innerHTML = checks('permissions', config.permissions, cs.permissions || []);
+  form.elements.allow_icon.checked = !!cs.allow_icon;
+  form.elements.require_review.checked = !!cs.require_review;
+  form.elements.max_name_length.value = cs.max_name_length ?? 32;
+  form.elements.banned_words.value = (cs.banned_words || []).join(', ');
+  form.elements.edit_price.value = cs.edit_price ?? 0;
+  form.elements.edit_cooldown_days.value = cs.edit_cooldown_days ?? 7;
+  syncType();
+  dialog.showModal();
+}
+$('#addBtn').onclick = run(() => openDialog());
+$('#refreshShop').onclick = run(async () => { await api('/api/shop/refresh', { method: 'POST' }); toast('تم تحديث إمبد المتجر'); });
+$('#cancelDialog').onclick = () => dialog.close();
+form.onsubmit = run(async (e) => {
+  e.preventDefault();
+  const f = form.elements, picked = (n) => [...form.querySelectorAll(`input[name="${n}"]:checked`)].map((i) => i.value);
+  const body = {
+    type: f.type.value, duration_days: f.duration_days.value, role_id: f.role_id.value, name: f.name.value, price: f.price.value,
+    description: f.description.value, features: f.features.value,
+  };
+  if (body.type === 'custom') body.custom_settings = {
+    color_modes: picked('color_modes'), permissions: picked('permissions'),
+    allow_icon: f.allow_icon.checked, require_review: f.require_review.checked,
+    max_name_length: f.max_name_length.value, banned_words: f.banned_words.value,
+    edit_price: f.edit_price.value, edit_cooldown_days: f.edit_cooldown_days.value,
+  };
+  const id = f.id.value;
+  await api(id ? `/api/products/${id}` : '/api/products', { method: id ? 'PUT' : 'POST', body });
+  dialog.close(); toast('تم حفظ المنتج'); await loadProducts();
+});
+
+// ---------- الطلبات ----------
+async function loadOrders() { orders = await api('/api/orders'); renderOrders(); }
+Object.entries(STATUS).forEach(([k, [label]]) => $('#orderFilter').append(new Option(label, k)));
+function renderOrders() {
+  const f = $('#orderFilter').value, q = $('#orderSearch').value.trim().toLowerCase();
+  const list = orders.filter((o) => (f === 'all' || (f === 'attention' ? NEEDS_ATTENTION.includes(o.status) : o.status === f))
+    && (!q || `${o.id} ${o.username} ${o.user_id} ${o.product_name}`.toLowerCase().includes(q)));
+  $('#ordersTable').innerHTML = ordersRows(list);
+}
+$('#orderFilter').onchange = renderOrders;
+$('#orderSearch').oninput = renderOrders;
+
+// ---------- الاشتراكات ----------
+let subs = [];
+const rel = (d) => {
+  const h = Math.round((new Date(d) - Date.now()) / 36e5), rtf = new Intl.RelativeTimeFormat('ar', { numeric: 'auto' });
+  return Math.abs(h) < 48 ? rtf.format(h, 'hour') : rtf.format(Math.round(h / 24), 'day');
+};
+async function loadSubs() { subs = await api('/api/subscriptions'); renderSubs(); }
+function renderSubs() {
+  const list = $('#subFilter').value === 'active' ? subs.filter((s) => s.status === 'active') : subs;
+  $('#subsTable').innerHTML = list.length
+    ? `<thead><tr><th>العميل</th><th>الرتبة</th><th>ينتهي</th><th>الحالة</th><th></th></tr></thead><tbody>${list.map((s) => `<tr>
+        <td>${esc(s.username || s.user_id)}<span class="sub">${esc(s.user_id)}</span></td>
+        <td>${esc(s.role_name || s.role_id)}${s.product_name ? `<span class="sub">${esc(s.product_name)}</span>` : ''}</td>
+        <td>${date(s.expires_at)}<span class="sub">${rel(s.expires_at)}</span></td>
+        <td>${statusBadge(s.status)}</td>
+        <td class="act">${s.status === 'active' ? `<button class="btn sm" data-extend="${s.id}">تمديد</button><button class="btn sm danger" data-revoke="${s.id}">سحب الآن</button>` : ''}</td></tr>`).join('')}</tbody>`
+    : '<tr><td class="empty">لا توجد اشتراكات. تظهر هنا عند شراء منتج له مدة اشتراك.</td></tr>';
+}
+$('#subFilter').onchange = renderSubs;
+$('#subsTable').onclick = run(async (e) => {
+  const ext = e.target.dataset.extend, rev = e.target.dataset.revoke;
+  if (ext) {
+    const days = parseInt(prompt('عدد أيام التمديد؟', '30'), 10);
+    if (!days) return;
+    await api(`/api/subscriptions/${ext}/extend`, { method: 'POST', body: { days } });
+    toast('تم التمديد'); await loadSubs();
+  }
+  if (rev && confirm('سحب الرتبة من العميل الآن وإنهاء الاشتراك؟')) {
+    await api(`/api/subscriptions/${rev}/revoke`, { method: 'POST' });
+    toast('تم سحب الرتبة'); await loadSubs();
+  }
+});
+
+// ---------- الكوبونات ----------
+let coupons = [];
+async function loadCoupons() { coupons = await api('/api/coupons'); renderCoupons(); }
+
+function renderCoupons() {
+  $('#couponsTable').innerHTML = coupons.length
+    ? `<thead><tr><th>الكود</th><th>الخصم</th><th>الاستخدام</th><th>للفرد</th><th>الانتهاء</th><th>الحالة</th><th></th></tr></thead><tbody>${coupons.map((c) => {
+        const expired = c.expires_at && new Date(c.expires_at) < new Date();
+        const state = !c.active ? ['متوقف', 'muted'] : expired ? ['منتهي', 'bad'] : c.max_uses != null && c.used >= c.max_uses ? ['مستنفد', 'warn'] : ['فعال', 'ok'];
+        return `<tr><td><code>${esc(c.code)}</code></td><td>${c.percent}%</td>
+          <td>${c.used} / ${c.max_uses ?? '∞'}</td><td>${c.max_uses_per_user ?? '∞'}</td>
+          <td>${c.expires_at ? date(c.expires_at) : '—'}</td><td><span class="badge ${state[1]}">${state[0]}</span></td>
+          <td class="act"><button class="btn sm" data-toggle="${c.id}">${c.active ? 'إيقاف' : 'تفعيل'}</button><button class="btn sm danger" data-delcoupon="${c.id}">حذف</button></td></tr>`;
+      }).join('')}</tbody>`
+    : '<tr><td class="empty">لا توجد كوبونات. اضغط «كوبون جديد».</td></tr>';
+}
+
+$('#couponsTable').onclick = run(async (e) => {
+  const t = e.target.dataset.toggle, d = e.target.dataset.delcoupon;
+  if (t) {
+    const c = coupons.find((x) => x.id == t);
+    await api(`/api/coupons/${t}`, { method: 'PATCH', body: { active: !c.active } });
+    await loadCoupons();
+  }
+  if (d && confirm('حذف هذا الكوبون؟')) { await api(`/api/coupons/${d}`, { method: 'DELETE' }); toast('تم حذف الكوبون'); await loadCoupons(); }
+});
+
+const couponDialog = $('#couponDialog'), couponForm = $('#couponForm');
+$('#addCoupon').onclick = () => { couponForm.reset(); couponDialog.showModal(); };
+$('#cancelCoupon').onclick = () => couponDialog.close();
+couponForm.onsubmit = run(async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(couponForm));
+  if (body.expires_at) body.expires_at = new Date(body.expires_at).toISOString(); // يتحول من توقيت المتصفح لـ UTC
+  await api('/api/coupons', { method: 'POST', body });
+  couponDialog.close(); toast('تم إنشاء الكوبون'); await loadCoupons();
+});
+
+// ---------- الإعدادات ----------
+const settingsForm = $('#settingsForm');
+const syncTaxRow = () => ($('#taxRow').hidden = settingsForm.elements.mode.value !== 'calculated');
+settingsForm.onchange = syncTaxRow;
+
+async function loadSettings() {
+  const s = await api('/api/settings');
+  settingsForm.elements.mode.value = s.payment_mode;
+  settingsForm.elements.tax.value = s.tax_percent;
+  settingsForm.elements.reference.value = s.reference_role_id || '';
+  settingsForm.elements.log_channel.value = s.log_channel_id || '';
+  settingsForm.elements.transcript_channel.value = s.transcript_channel_id || '';
+  settingsForm.elements.alert_channel.value = s.alert_channel_id || '';
+  settingsForm.elements.idle_hours.value = s.idle_close_hours ?? 24;
+  syncTaxRow();
+}
+settingsForm.onsubmit = run(async (e) => {
+  e.preventDefault();
+  await api('/api/settings', { method: 'PUT', body: {
+    payment_mode: settingsForm.elements.mode.value,
+    tax_percent: settingsForm.elements.tax.value || 0,
+    reference_role_id: settingsForm.elements.reference.value,
+    log_channel_id: settingsForm.elements.log_channel.value,
+    transcript_channel_id: settingsForm.elements.transcript_channel.value,
+    alert_channel_id: settingsForm.elements.alert_channel.value,
+    idle_close_hours: settingsForm.elements.idle_hours.value,
+  } });
+  toast('تم حفظ الإعدادات');
+});
+
+init();
