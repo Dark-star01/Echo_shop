@@ -121,7 +121,7 @@
         <label class="field">معرف روم نسخ التذاكر (ملف نصي عند إغلاق كل تذكرة)
           <input name="transcript_channel" inputmode="numeric" placeholder="فارغ = بدون نسخ"></label>
         <label class="field">معرف روم تنبيهات الأخطاء (فارغ = يستخدم روم اللوق)
-          <input name="alert_channel" inputmode="numeric" placeholder="فارغ = روم اللوق"></label>
+          <input name="alert_channel" inputmode="numeric" placeholder="احتياطي فقط — الأخطاء تروح للويب هوك (ERROR_WEBHOOK_URL)"></label>
         <label class="field">إغلاق التذاكر الخاملة تلقائياً بعد كم ساعة (0 = معطل)
           <input name="idle_hours" type="number" min="0" max="720" value="24"></label>
         <button class="btn primary" type="submit">حفظ الإعدادات</button>
@@ -150,7 +150,7 @@
       <select name="type"><option value="fixed">رتبة جاهزة</option><option value="custom">رتبة قابلة للإنشاء (العميل يصممها)</option></select></label>
     <label class="field" id="roleField">معرف الرتبة<input name="role_id" inputmode="numeric" placeholder="123456789012345678"></label>
     <label class="field">اسم المنتج<input name="name" required maxlength="100"></label>
-    <label class="field">السعر (كريديت)<input name="price" type="number" min="1" step="1" required></label>
+    <label class="field">السعر (كريديت — 0 = مجاني)<input name="price" type="number" min="0" step="1" required></label>
     <label class="field" id="durationField">مدة الاشتراك بالأيام (فارغ = دائم)<input name="duration_days" type="number" min="1" max="3650"></label>
     <label class="field">الوصف<textarea name="description" rows="2" maxlength="500"></textarea></label>
     <label class="field">المميزات (كل سطر مميزة)<textarea name="features" rows="4" maxlength="1000"></textarea></label>

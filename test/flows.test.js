@@ -90,6 +90,26 @@ const pay = async (ch, member, amount) => {
     assert.equal(chC.collector, null);
     log('كوبون 100%: تسليم مباشر بدون دفع');
 
+    // ===== منتج سعره 0 (بدون كوبون): تسليم مباشر بدون دفع ولا انهيار =====
+    st.products.push({ id: 9, type: 'fixed', role_id: FIXED_ROLE, name: 'Free', price: 0, description: '', features: '', duration_days: null, custom_settings: {} });
+    const FR = W.makeMember('444444444444444444'); const chFR = await openTicket(FR);
+    const fsel = await press('select_role', FR, chFR, { values: ['9'] });
+    assert.ok(fsel.last('update').embeds[0].data.description.includes('مجاني'));
+    const fconf = await press('confirm_9', FR, chFR);
+    await waitFor(() => FR.roles.cache.has(FIXED_ROLE), 'free product role');
+    assert.equal(chFR.collector, null, 'ما في مراقبة دفع');
+    assert.ok(text(fconf.last('editReply')).includes('مجاني'));
+    assert.equal(st.orders.at(-1).required_amount, 0);
+    st.products = st.products.filter(p => p.id !== 9);
+    log('منتج سعره 0: تسليم مباشر بدون دفع');
+
+    // ===== شبكة الأمان: تفاعل «يفكر» بدون رد نهائي يُعالج =====
+    const stuck = W.interaction('button', { customId: 'shop_edit', member: W.makeMember('777000000000000001'), channel: W.makeChannel('shop') });
+    stuck.editReply = async () => { throw new Error('boom'); }; // أول محاولة ترد تفشل
+    await dispatch(stuck);
+    assert.ok(stuck.deferred, 'تم الرد بـ يفكر');
+    log('شبكة الأمان: لا يبقى تفاعل معلّق بدون معالجة');
+
     // ===== رتبة قابلة للإنشاء =====
     const D = W.makeMember('444444444444444444'); const chD = await openTicket(D);
     await press('select_role', D, chD, { values: ['2'] });
@@ -130,7 +150,7 @@ const pay = async (ch, member, amount) => {
     // ===== تعديل الرتبة =====
     await chD.delete();
     const nobody = W.makeMember('666000000000000001');
-    assert.ok((await press('shop_edit', nobody, W.makeChannel('shop'))).last('reply').content.includes('لازم تشتري'));
+    assert.ok((await press('shop_edit', nobody, W.makeChannel('shop'))).last('editReply').content.includes('لازم تشتري'));
     const cool = await press('shop_edit', D, W.makeChannel('shop'));
     assert.ok(text(cool.last('editReply')).includes('⏳'), 'فترة الانتظار');
     st.customRoles[0].last_edited_at = new Date(Date.now() - 10 * 864e5).toISOString();
@@ -166,6 +186,33 @@ const pay = async (ch, member, amount) => {
     await onMessage(msg('$حذف تأكيد', S, chF)); await tick(80);
     assert.equal(chF.deleted, true); assert.equal(st.orders.find(o => o.id === 900).status, 'closed_manually');
     log('أوامر الستاف: تجاهل غير الستاف، مساعدة، حماية الطلب المدفوع، إعادة تسليم، حذف بتأكيد');
+
+    // ===== لوق التذاكر في روم لوق البوت =====
+    const logCh = W.makeChannel('bot-log'); logCh.isTextBased = () => true;
+    W.guild.channels.cache.set(logCh.id, logCh);
+    st.settings.log_channel_id = logCh.id;
+    const L = W.makeMember('888000000000000001'); const chL = await openTicket(L);
+    const opened = logCh.sent.at(-1).embeds[0].data;
+    assert.equal(opened.title, '🎫 تذكرة جديدة');
+    assert.ok(text(opened.fields).includes(L.id) && text(opened.fields).includes(chL.id));
+    // إغلاق بأمر ستاف -> «تذكرة أُغلقت» مع اسم من أغلقها
+    await onMessage(msg('$حذف', S, chL)); await tick(80);
+    const closed = logCh.sent.at(-1).embeds[0].data;
+    assert.equal(closed.title, '🔒 تذكرة أُغلقت');
+    assert.ok(text(closed.fields).includes(S.id) && text(closed.fields).includes(L.id));
+    // حذف يدوي من ديسكورد (بدون البوت) يُسجَّل، والحذف الداخلي ما يتكرر
+    const { handleChannelDelete } = require('../utils/tickets.js');
+    const before = logCh.sent.length;
+    await handleChannelDelete(chL); await tick(30);
+    assert.equal(logCh.sent.length, before, 'ما يتكرر لوق الإغلاق');
+    const M = W.makeMember('888000000000000002'); const chM = await openTicket(M);
+    const n = logCh.sent.length;
+    await handleChannelDelete(chM); await tick(30);
+    assert.ok(text(logCh.sent.at(-1).embeds[0].data.fields).includes('حُذفت يدويًا'));
+    assert.equal(logCh.sent.length, n + 1);
+    // تذكرة فاضية فشل تجهيزها لا تظهر في اللوق
+    st.settings.log_channel_id = '';
+    log('لوق البوت: فتح التذكرة + إغلاقها (من/لماذا) + حذف يدوي بدون تكرار');
 
     // ===== متفرقات =====
     const { buildShopMessage } = require('../utils/shopMessage.js');

@@ -18,7 +18,7 @@ module.exports = {
             .setDescription('إضافة منتج جديد')
             .addStringOption(opt => opt.setName('role_id').setDescription('معرف الرتبة').setRequired(true))
             .addStringOption(opt => opt.setName('name').setDescription('اسم المنتج').setRequired(true).setMaxLength(100))
-            .addIntegerOption(opt => opt.setName('price').setDescription('السعر بالكريديت').setRequired(true).setMinValue(1))
+            .addIntegerOption(opt => opt.setName('price').setDescription('السعر بالكريديت (0 = مجاني)').setRequired(true).setMinValue(0))
             .addStringOption(opt => opt.setName('description').setDescription('وصف المنتج').setMaxLength(500))
             .addStringOption(opt => opt.setName('features').setDescription('المميزات (كل سطر مميزة)').setMaxLength(1000))
         )
@@ -55,6 +55,10 @@ module.exports = {
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
 
+        // نرد فورًا بـ «يفكر» ثم نعدّل الرد: أي أمر يلمس قاعدة البيانات/ديسكورد قد يتجاوز مهلة الـ 3 ثواني
+        await interaction.deferReply({ flags: EPHEMERAL });
+        const send = ({ content, embeds }) => interaction.editReply({ content: content ?? null, embeds: embeds ?? [] });
+
         if (sub === 'add') {
             const role_id = interaction.options.getString('role_id').trim();
             const name = interaction.options.getString('name').trim();
@@ -63,17 +67,17 @@ module.exports = {
             const features = interaction.options.getString('features') || '';
 
             if (!isValidRoleId(role_id)) {
-                return interaction.reply({ content: '❌ معرف الرتبة غير صالح (لازم أرقام فقط، 17–20 رقم).', flags: EPHEMERAL });
+                return send({ content: '❌ معرف الرتبة غير صالح (لازم أرقام فقط، 17–20 رقم).' });
             }
 
             // نتأكد أن الرتبة موجودة وأن البوت يقدر يعطيها (عشان ما نكتشف المشكلة بعد ما العميل يدفع)
             const guild = interaction.guild;
             const role = guild.roles.cache.get(role_id) ?? await guild.roles.fetch(role_id).catch(() => null);
             if (!role) {
-                return interaction.reply({ content: '❌ هذه الرتبة غير موجودة في السيرفر.', flags: EPHEMERAL });
+                return send({ content: '❌ هذه الرتبة غير موجودة في السيرفر.' });
             }
             if (role.managed || role.id === guild.id) {
-                return interaction.reply({ content: '❌ لا يمكن بيع هذه الرتبة (رتبة بوت/تكامل أو @everyone).', flags: EPHEMERAL });
+                return send({ content: '❌ لا يمكن بيع هذه الرتبة (رتبة بوت/تكامل أو @everyone).' });
             }
             const botCanAssign = guild.members.me && role.position < guild.members.me.roles.highest.position;
 
@@ -81,29 +85,29 @@ module.exports = {
                 await db.addProduct({ role_id, name, price, description, features });
                 refreshShopMessage(interaction.client);
                 const warning = botCanAssign ? '' : '\n⚠️ **تنبيه:** رتبة البوت ليست أعلى من هذه الرتبة — لن يقدر يعطيها! ارفع رتبة البوت قبل البيع.';
-                await interaction.reply({ content: `✅ تم إضافة المنتج **${name}** بنجاح!${warning}`, flags: EPHEMERAL });
+                await send({ content: `✅ تم إضافة المنتج **${name}** بنجاح!${warning}` });
             } catch (error) {
                 const msg = error.code === '23505' ? 'هذه الرتبة مضافة كمنتج بالفعل.' : error.message;
-                await interaction.reply({ content: `❌ فشل الإضافة: ${msg}`, flags: EPHEMERAL });
+                await send({ content: `❌ فشل الإضافة: ${msg}` });
             }
         } else if (sub === 'remove') {
             const id = interaction.options.getInteger('id');
             try {
                 const product = await db.getProductById(id);
                 if (!product) {
-                    return await interaction.reply({ content: '❌ المنتج غير موجود!', flags: EPHEMERAL });
+                    return await send({ content: '❌ المنتج غير موجود!' });
                 }
                 await db.deleteProduct(id);
                 refreshShopMessage(interaction.client);
-                await interaction.reply({ content: `✅ تم حذف المنتج **${product.name}** بنجاح!`, flags: EPHEMERAL });
+                await send({ content: `✅ تم حذف المنتج **${product.name}** بنجاح!` });
             } catch (error) {
-                await interaction.reply({ content: `❌ فشل الحذف: ${error.message}`, flags: EPHEMERAL });
+                await send({ content: `❌ فشل الحذف: ${error.message}` });
             }
         } else if (sub === 'list') {
             try {
                 const products = await db.getAllProducts();
                 if (products.length === 0) {
-                    return await interaction.reply({ content: '📭 لا توجد منتجات حالياً.', flags: EPHEMERAL });
+                    return await send({ content: '📭 لا توجد منتجات حالياً.' });
                 }
 
                 const embed = new EmbedBuilder()
@@ -116,38 +120,37 @@ module.exports = {
                     ).join('\n\n').slice(0, 4000))
                     .setFooter({ text: `إجمالي ${products.length} منتج` });
 
-                await interaction.reply({ embeds: [embed], flags: EPHEMERAL });
+                await send({ embeds: [embed] });
             } catch (error) {
-                await interaction.reply({ content: `❌ فشل جلب المنتجات: ${error.message}`, flags: EPHEMERAL });
+                await send({ content: `❌ فشل جلب المنتجات: ${error.message}` });
             }
         } else if (sub === 'link') {
             const user = interaction.options.getUser('user');
             const role = interaction.options.getRole('role');
             const productId = interaction.options.getInteger('product');
             if (role.managed || role.id === interaction.guild.id) {
-                return interaction.reply({ content: '❌ لا يمكن ربط هذه الرتبة (رتبة بوت/تكامل أو @everyone).', flags: EPHEMERAL });
+                return send({ content: '❌ لا يمكن ربط هذه الرتبة (رتبة بوت/تكامل أو @everyone).' });
             }
             try {
                 if (productId && !(await db.getProductById(productId))) {
-                    return await interaction.reply({ content: '❌ المنتج غير موجود!', flags: EPHEMERAL });
+                    return await send({ content: '❌ المنتج غير موجود!' });
                 }
                 const member = await interaction.guild.members.fetch(user.id).catch(() => null);
                 await db.addCustomRole({ user_id: user.id, role_id: role.id, product_id: productId, name: role.name, source: 'linked' });
                 const warn = member && member.roles.cache.has(role.id) ? '' : '\n⚠️ تنبيه: العضو لا يملك هذه الرتبة حالياً.';
-                await interaction.reply({ content: `✅ تم ربط ${user} برتبته ${role}.${warn}`, flags: EPHEMERAL });
+                await send({ content: `✅ تم ربط ${user} برتبته ${role}.${warn}` });
             } catch (error) {
-                await interaction.reply({ content: `❌ فشل الربط: ${error.message}`, flags: EPHEMERAL });
+                await send({ content: `❌ فشل الربط: ${error.message}` });
             }
         } else if (sub === 'unlink') {
             const role = interaction.options.getRole('role');
             try {
                 await db.deleteCustomRole(role.id);
-                await interaction.reply({ content: `✅ تم فك ربط ${role} (الرتبة نفسها لم تُحذف من السيرفر).`, flags: EPHEMERAL });
+                await send({ content: `✅ تم فك ربط ${role} (الرتبة نفسها لم تُحذف من السيرفر).` });
             } catch (error) {
-                await interaction.reply({ content: `❌ فشل فك الربط: ${error.message}`, flags: EPHEMERAL });
+                await send({ content: `❌ فشل فك الربط: ${error.message}` });
             }
         } else if (sub === 'diagnose') {
-            await interaction.deferReply({ flags: EPHEMERAL });
             try {
                 await interaction.editReply({ embeds: [await require('../utils/diagnose.js').runDiagnostics(interaction.guild)] });
             } catch (error) {
@@ -160,9 +163,9 @@ module.exports = {
                 // نحفظ مكان الرسالة لتتحدث تلقائيًا عند أي تغيير في المنتجات
                 const sent = await interaction.channel.send(buildShopMessage(products));
                 await db.saveSettings({ shop_message: { channel_id: sent.channelId, message_id: sent.id } });
-                await interaction.reply({ content: '✅ تم نشر إمبد المتجر في هذا الروم، وسيتحدث تلقائياً عند أي تغيير في المنتجات.', flags: EPHEMERAL });
+                await send({ content: '✅ تم نشر إمبد المتجر في هذا الروم، وسيتحدث تلقائياً عند أي تغيير في المنتجات.' });
             } catch (error) {
-                await interaction.reply({ content: `❌ فشل النشر: ${error.message}`, flags: EPHEMERAL });
+                await send({ content: `❌ فشل النشر: ${error.message}` });
             }
         }
     }

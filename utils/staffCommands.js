@@ -4,7 +4,7 @@ const { getTicketOwnerId, isStaffMember, scheduleDelete } = require('./tickets.j
 const { fulfillOrder } = require('./payments.js');
 
 const PREFIX = process.env.STAFF_PREFIX || '$';
-const PAID_STATES = ['paid', 'role_failed', 'customizing', 'pending_review']; // عميل دفع ولم يستلم
+const PAID_STATES = ['paid', 'role_failed', 'mismatch', 'customizing', 'pending_review']; // عميل دفع ولم يستلم
 
 // توحيد الكتابة: همزات الألف، التاء المربوطة، الياء المقصورة
 const norm = (w) => String(w).toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي');
@@ -51,11 +51,11 @@ async function handleMessage(message) {
         }
         if (paid) await db.updateOrder(paid.id, { status: 'closed_manually', error: `أغلقها ${message.author.tag}` }).catch(() => {});
 
-        if (cmd === 'delete') return scheduleDelete(channel, 0, { transcript: false });
+        if (cmd === 'delete') return scheduleDelete(channel, 0, { transcript: false, by: message.author, reason: 'حذف فوري ($حذف)' });
 
         const reason = args.filter(a => !isConfirm(a)).join(' ');
         await channel.send(`🔒 أغلق ${message.author} التذكرة${reason ? ` — السبب: ${reason}` : ''}. سيتم حذفها خلال 3 ثواني.`);
-        return scheduleDelete(channel, 3000);
+        return scheduleDelete(channel, 3000, { by: message.author, reason: reason || '$غلق' });
     }
 
     if (cmd === 'add' || cmd === 'remove') {
@@ -79,7 +79,7 @@ async function handleMessage(message) {
 
     if (cmd === 'retry') {
         const orders = await db.getOrdersByChannel(channel.id).catch(() => []);
-        const order = orders.find(o => ['role_failed', 'error', 'paid'].includes(o.status));
+        const order = orders.find(o => ['role_failed', 'error', 'paid', 'mismatch'].includes(o.status));
         if (!order) return reply('⚠️ ما في طلب بانتظار إعادة التسليم في هذه التذكرة.');
         const member = await message.guild.members.fetch(order.user_id).catch(() => null);
         if (!member) return reply('❌ العميل غير موجود في السيرفر.');

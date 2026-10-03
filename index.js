@@ -19,8 +19,9 @@ const db = require('./utils/db.js');
 const adminCommand = require('./commands/admin.js');
 const { calculateSendAmount, formatDuration, withTimeout } = require('./utils/helpers.js');
 const {
-    eph, ticketTopic, staffMention, isStaffMember, checkTicketAccess, findOpenTicket, scheduleDelete, ticketButtonsRow,
+    eph, ticketTopic, staffMention, isStaffMember, checkTicketAccess, findOpenTicket, scheduleDelete, ticketButtonsRow, quietDelete, handleChannelDelete,
 } = require('./utils/tickets.js');
+const { logTicket } = require('./utils/logger.js');
 const customRoles = require('./utils/customRoles.js');
 const editRole = require('./utils/editRole.js');
 const alerts = require('./utils/alerts.js');
@@ -121,8 +122,38 @@ const STAFF_CALL_COOLDOWN_MS = 60_000;
 // ============================================================
 //  ⚙️  التعامل مع كل التفاعلات
 // ============================================================
+// ⏱️ شبكة أمان: أي تفاعل «يفكر» (deferred) ولم يُرد عليه نهائيًا يأخذ رسالة بدل ما يبقى معلّقًا للأبد
+const INTERACTION_WATCHDOG_MS = Number(process.env.INTERACTION_WATCHDOG_MS) || 25_000;
+
+async function settleStuckInteraction(interaction, reason) {
+    try {
+        if (interaction.isAutocomplete?.()) return;
+        const content = '⚠️ تعذّر إكمال العملية في الوقت المناسب، حاول مرة أخرى أو اضغط طلب ستاف.';
+        if (interaction._thinking && !interaction.replied) {
+            console.warn(`⚠️ تفاعل معلّق (${reason}): ${interaction.customId || interaction.commandName}`);
+            await interaction.editReply({ content, embeds: [], components: [] });
+        } else if (!interaction.deferred && !interaction.replied) {
+            console.warn(`⚠️ تفاعل بدون رد (${reason}): ${interaction.customId || interaction.commandName}`);
+            await interaction.reply(eph(content));
+        }
+    } catch (_) { /* انتهت صلاحية التفاعل */ }
+}
+
 client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.guild && !isAllowedGuild(interaction.guild.id)) return;
+
+    // نعلّم التفاعلات اللي استخدمت deferReply (غير deferUpdate) لنقدر نعالجها لو علقت
+    const originalDefer = interaction.deferReply?.bind(interaction);
+    if (originalDefer) {
+        interaction.deferReply = async (...args) => {
+            const result = await originalDefer(...args);
+            interaction._thinking = true;
+            return result;
+        };
+    }
+
+    let finished = false;
+    const watchdog = setTimeout(() => { if (!finished) settleStuckInteraction(interaction, 'watchdog'); }, INTERACTION_WATCHDOG_MS);
 
     try {
         await handleInteraction(interaction);
@@ -131,9 +162,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         alerts.alertError('خطأ في تفاعل', error, { context: `${interaction.customId || interaction.commandName} — ${interaction.user?.tag}` });
         const payload = eph('❌ حدث خطأ غير متوقع، حاول مرة أخرى أو اضغط طلب ستاف.');
         try {
-            if (interaction.deferred || interaction.replied) await interaction.followUp(payload);
+            if (interaction._thinking && !interaction.replied) await interaction.editReply({ content: payload.content, embeds: [], components: [] });
+            else if (interaction.deferred || interaction.replied) await interaction.followUp(payload);
             else await interaction.reply(payload);
         } catch (_) { /* التفاعل انتهت صلاحيته */ }
+    } finally {
+        finished = true;
+        clearTimeout(watchdog);
+        await settleStuckInteraction(interaction, 'finished');
     }
 });
 
@@ -150,9 +186,10 @@ async function customProductBlock(product, userId) {
 // 📦 إمبد المنتج وأزراره (مع خصم الكوبون لو موجود)
 function productEmbed(product, coupon = null) {
     const price = coupon ? applyDiscount(product.price, coupon.percent) : product.price;
+    const fmtPrice = (n) => (Number(n) === 0 ? '**مجاني**' : `${Number(n).toLocaleString()} كريديت`);
     const priceLine = coupon
-        ? `~~${product.price.toLocaleString()}~~ **${price.toLocaleString()}** كريديت — 🎟️ خصم ${coupon.percent}% (\`${coupon.code}\`)`
-        : `${product.price.toLocaleString()} كريديت`;
+        ? `~~${Number(product.price).toLocaleString()}~~ ${price === 0 ? '**مجاني**' : `**${price.toLocaleString()}** كريديت`} — 🎟️ خصم ${coupon.percent}% (\`${coupon.code}\`)`
+        : fmtPrice(product.price);
     return new EmbedBuilder()
         .setColor(0x5865F2)
         .setTitle(`📦 ${product.name}`)
@@ -177,6 +214,11 @@ function productRows(product, coupon = null) {
         ticketButtonsRow(),
     ];
 }
+
+// 🗑️ تذكرة انحذفت يدويًا من ديسكورد: نسجلها في اللوق
+client.on(Events.ChannelDelete, (channel) => {
+    handleChannelDelete(channel).catch((e) => console.error('❌ لوق حذف التذكرة:', e));
+});
 
 // ⌨️ أوامر الستاف بالبادئة داخل التذاكر ($غلق، $حذف، ...)
 client.on(Events.MessageCreate, (message) => {
@@ -217,7 +259,24 @@ async function handleInteraction(interaction) {
         ticketCreationLocks.set(member.id, Date.now());
 
         const startedAt = Date.now();
-        const reply = (content) => interaction.editReply({ content }).catch(() => {});
+        // محاولتين لتعديل الرد، ثم رسالة جديدة كاحتياط — مع تسجيل السبب بدل ابتلاع الخطأ (كان يترك «يفكر» للأبد)
+        const reply = async (content) => {
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    await withTimeout(interaction.editReply({ content }), 10_000, 'تعديل الرد');
+                    return true;
+                } catch (error) {
+                    console.error(`❌ editReply (محاولة ${attempt}):`, error.message);
+                }
+            }
+            try {
+                await withTimeout(interaction.followUp(eph(content)), 10_000, 'رسالة المتابعة');
+                return true;
+            } catch (error) {
+                console.error('❌ followUp:', error.message);
+                return false;
+            }
+        };
         const step = (promise, label) => withTimeout(promise, ticketStepMs(), label);
         let ticketChannel = null;
 
@@ -275,7 +334,7 @@ async function handleInteraction(interaction) {
                 .addOptions(
                     products.slice(0, 25).map(p => ({ // حد ديسكورد: 25 خيار بالقائمة
                         label: (p.name || `منتج #${p.id}`).slice(0, 100),
-                        description: `${Number(p.price).toLocaleString()} كريديت`,
+                        description: Number(p.price) === 0 ? 'مجاني' : `${Number(p.price).toLocaleString()} كريديت`,
                         value: String(p.id),
                     }))
                 );
@@ -295,16 +354,17 @@ async function handleInteraction(interaction) {
             } catch (error) {
                 console.error('❌ فشل إرسال لوحة التذكرة، يُحذف الروم:', error);
                 alerts.alertError('فتح تذكرة: فشل إرسال اللوحة', error, { context: `${member.user?.tag} — ${ticketChannel.name}` });
-                await ticketChannel.delete().catch(() => {});
+                await quietDelete(ticketChannel);
                 return reply('❌ تعذّر تجهيز التذكرة (صلاحيات البوت في الفئة؟). حاول مرة أخرى أو تواصل مع الستاف.');
             }
 
+            logTicket(guild, 'opened', { channel: ticketChannel, ownerId: member.id }); // لوق: تذكرة جديدة
             await reply(`✅ تم فتح تذكرتك في ${ticketChannel}`);
             const took = Date.now() - startedAt;
             if (took > 4000) console.warn(`⚠️ فتح التذكرة استغرق ${Math.round(took / 1000)}ث (${member.user?.tag}) — راجع سرعة سوبابيس/ديسكورد`);
         } catch (error) {
             // خطأ غير متوقع بعد إنشاء الروم: لا نترك روماً فاضياً
-            if (ticketChannel) await ticketChannel.delete().catch(() => {});
+            if (ticketChannel) await quietDelete(ticketChannel);
             throw error;
         } finally {
             ticketCreationLocks.delete(member.id);
@@ -353,12 +413,12 @@ async function handleInteraction(interaction) {
         if (active && active.status !== 'awaiting_payment' && !staff) {
             return interaction.reply(eph('⚠️ هناك عملية دفع قيد المعالجة في هذه التذكرة. تواصل مع الستاف لإغلاقها.'));
         }
-        if (active && ['paid', 'role_failed', 'customizing', 'pending_review'].includes(active.status)) {
+        if (active && ['paid', 'role_failed', 'mismatch', 'customizing', 'pending_review'].includes(active.status)) {
             await db.updateOrder(active.id, { status: 'closed_manually', error: `أغلقها ${interaction.user.tag}` }).catch(() => {});
         }
 
         await interaction.reply({ content: '🔒 سيتم إغلاق التذكرة خلال 3 ثواني...' });
-        scheduleDelete(interaction.channel, 3000);
+        scheduleDelete(interaction.channel, 3000, { by: interaction.user, reason: staff ? 'زر الإغلاق (ستاف)' : 'زر الإغلاق' });
         return;
     }
 
@@ -373,7 +433,7 @@ async function handleInteraction(interaction) {
 
         const orderId = parseInt(interaction.customId.replace('retry_role_', ''), 10);
         const order = await db.getOrderById(orderId).catch(() => null);
-        if (!order || !['role_failed', 'error', 'paid'].includes(order.status)) {
+        if (!order || !['role_failed', 'error', 'paid', 'mismatch'].includes(order.status)) {
             return interaction.editReply({ content: '⚠️ هذا الطلب غير موجود أو تم تسليمه بالفعل.' });
         }
         if (order.channel_id !== interaction.channelId) {
@@ -386,7 +446,7 @@ async function handleInteraction(interaction) {
         }
 
         const ok = await fulfillOrder({ order, channel: interaction.channel, member });
-        return interaction.editReply({ content: ok ? '✅ تم منح الرتبة.' : '❌ فشلت المحاولة مرة أخرى، راجع رسالة التنبيه.' });
+        return interaction.editReply({ content: ok ? '✅ تم تسليم الطلب.' : '❌ فشلت المحاولة مرة أخرى، راجع رسالة التنبيه.' });
     }
 
     // ------------------------------------------------------------
@@ -445,7 +505,7 @@ async function handleInteraction(interaction) {
     if (interaction.isButton() && interaction.customId.startsWith('cancel_')) {
         if (!(await checkTicketAccess(interaction, { allowStaff: true }))) return;
         await interaction.update({ content: '❌ تم إلغاء عملية الشراء.', embeds: [], components: [] });
-        scheduleDelete(interaction.channel, 3000);
+        scheduleDelete(interaction.channel, 3000, { by: interaction.user, reason: 'إلغاء عملية الشراء' });
         return;
     }
 
@@ -535,9 +595,15 @@ async function handleInteraction(interaction) {
                 }
             }
 
+            // 🎁 سعر 0 (منتج مجاني أو خصم 100%): لا دفع ولا مراقبة تحويل — ننتقل مباشرة للتسليم / خطوة ما بعد الدفع
             if (totalAmount === 0) {
-                await interaction.editReply({ content: `🎟️ تم تطبيق الكوبون (خصم ${coupon.percent}%) — جاري تسليم طلبك...`, embeds: [], components: [] });
-                fulfillOrder({ order, channel, member }).catch((e) => console.error('❌ fulfillOrder (مجاني):', e));
+                const freeNote = coupon ? `🎟️ تم تطبيق الكوبون (خصم ${coupon.percent}%)` : '🎁 هذا المنتج مجاني';
+                await interaction.editReply({ content: `${freeNote} — جاري تجهيز طلبك...`, embeds: [], components: [] });
+                await db.updateOrder(order.id, { paid_at: new Date().toISOString(), actual_amount: 0 }).catch(() => {});
+                fulfillOrder({ order, channel, member }).catch((e) => {
+                    console.error('❌ fulfillOrder (مجاني):', e);
+                    alerts.alertError(`فشل تسليم طلب مجاني #${order.id}`, e, { ping: true, context: `<@${member.id}> — ${product.name}` });
+                });
                 return;
             }
 

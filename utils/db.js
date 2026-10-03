@@ -107,7 +107,7 @@ async function getLogs(limit = 100) {
 //  🛒  الطلبات (orders)
 // ============================================================
 
-const ACTIVE_ORDER_STATUSES = ['awaiting_payment', 'paid', 'role_failed', 'customizing', 'pending_review'];
+const ACTIVE_ORDER_STATUSES = ['awaiting_payment', 'paid', 'role_failed', 'mismatch', 'customizing', 'pending_review'];
 
 async function createOrder({ channel_id, user_id, username, product_id, product_name, role_id = null, required_amount, send_amount, expires_at, product_type = 'fixed', draft = null, status = 'awaiting_payment', coupon_id = null, discount_percent = null, original_amount = null, duration_days = null }) {
     const { data, error } = await supabase

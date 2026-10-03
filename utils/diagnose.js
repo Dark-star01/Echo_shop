@@ -57,6 +57,10 @@ async function runDiagnostics(guild) {
         lines.push(bad(`فشل الاتصال بسوبابيس: ${e.message}`));
     }
 
+    // 5b) ويب هوك الأخطاء
+    lines.push(require('./alerts.js').webhookUrl() ? ok('ويب هوك الأخطاء مضبوط (`ERROR_WEBHOOK_URL`).')
+        : warn('`ERROR_WEBHOOK_URL` غير محدد أو غير صالح — الأخطاء البرمجية لن تصل لأحد (إلا روم التنبيهات الاحتياطي).'));
+
     // 6) ديسكورد
     const ping = guild.client?.ws?.ping;
     if (Number.isFinite(ping)) lines.push(ping > 800 ? warn(`تأخر الاتصال بديسكورد ${ping}ms.`) : ok(`اتصال ديسكورد ${ping}ms.`));

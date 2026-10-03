@@ -130,7 +130,7 @@ async function createCustomRole({ order, channel, member }) {
     await safe(() => db.updateOrder(order.id, { status: 'completed', role_id: role.id, completed_at: new Date().toISOString(), error: null, draft: slim }));
     logOrder(guild, 'role_created', order, `الرتبة: ${role.name}`);
     await safe(() => channel.send({ content: `✅ تم إنشاء رتبتك ${role} ومنحك إياها! سيُغلق التذكرة خلال ثوانٍ.` }));
-    scheduleDelete(channel, 5000);
+    scheduleDelete(channel, 5000, { reason: 'اكتمل الطلب (رتبة مخصصة)' });
     return true;
 }
 
@@ -168,7 +168,7 @@ async function editCustomRole({ order, channel, member }) {
     await safe(() => db.updateOrder(order.id, { status: 'completed', completed_at: new Date().toISOString(), error: null, draft: { ...d, icon_b64: null } }));
     logOrder(channel.guild, 'role_edited', order, `الرتبة: ${d.name}`);
     await safe(() => channel.send({ content: `✅ تم تعديل رتبتك ${role}! سيُغلق التذكرة خلال ثوانٍ.` }));
-    scheduleDelete(channel, 5000);
+    scheduleDelete(channel, 5000, { reason: 'اكتمل تعديل الرتبة' });
     return true;
 }
 

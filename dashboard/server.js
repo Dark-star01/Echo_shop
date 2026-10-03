@@ -46,7 +46,7 @@ function validateProductInput(body = {}) {
     const features = String(body.features ?? '').trim();
     if (type === 'fixed' && !isValidRoleId(role_id)) return { error: 'معرف الرتبة غير صالح (أرقام فقط، 17–20 رقم)' };
     if (!name || name.length > 100) return { error: 'اسم المنتج مطلوب (حد أقصى 100 حرف)' };
-    if (!Number.isInteger(price) || price <= 0 || price > 2_000_000_000) return { error: 'السعر لازم يكون رقم صحيح موجب' };
+    if (!Number.isInteger(price) || price < 0 || price > 2_000_000_000) return { error: 'السعر لازم يكون رقم صحيح (0 = مجاني)' };
     if (description.length > 500) return { error: 'الوصف طويل (حد أقصى 500 حرف)' };
     if (features.length > 1000) return { error: 'المميزات طويلة (حد أقصى 1000 حرف)' };
     return { value: {
@@ -227,7 +227,7 @@ function start(client) {
             completed: sold.length,
             revenue: sum(sold),
             revenueWeek: sum(sold.filter(o => new Date(o.created_at).getTime() > now - 7 * DAY)),
-            attention: orders.filter(o => ['role_failed', 'error'].includes(o.status)).length,
+            attention: orders.filter(o => ['role_failed', 'error', 'mismatch'].includes(o.status)).length,
             reviews: orders.filter(o => o.status === 'pending_review').length,
             daily: Array.from({ length: 14 }, (_, i) => {
                 const day = new Date(now - (13 - i) * DAY).toISOString().slice(0, 10);

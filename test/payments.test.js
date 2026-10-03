@@ -87,6 +87,9 @@ async function waitForCollector(channel) {
     assert.equal(calculateSendAmount(500, 0), 500);
     assert.equal(calculateMaxNet(1053, 5), 1000);
     assert.equal(extractAmount('has transferred `$1,000` to'), 1000);
+    assert.equal(extractAmount('has transferred `$5` to'), 5, 'مبلغ من خانة واحدة');
+    assert.equal(extractAmount('has transferred `$1` to'), 1);
+    assert.equal(evaluateAmount(5, 5, 5), 'success');
     assert.equal(evaluateAmount(1000, 1000, 1000), 'success');
     assert.equal(evaluateAmount(999, 1000, 1000), 'underpaid');
     assert.equal(evaluateAmount(1001, 1000, 1000), 'overpaid');
@@ -129,10 +132,26 @@ async function waitForCollector(channel) {
         await waitForCollector(channel);
         deliver(channel, probotMessage(`<@${PAYER}> transferred \`$900\` to <@${BANK}>`));
         await flow;
-        assert.deepEqual(statuses(order), ['failed']);
+        assert.deepEqual(statuses(order), ['mismatch']);
         assert.equal(calls.logs.at(-1).status, 'underpaid');
         assert.ok(!member.roles.cache.has(order.role_id));
-        console.log('✔ مبلغ أقل -> failed بدون رتبة');
+        assert.equal(channel.deleted, false, 'التذكرة لازم ما تنحذف بعد تحويل خاطئ');
+        await tick(100);
+        const alert = channel.sent.find(m => m.components?.length && m.content.includes(`<@&${process.env.STAFF_ROLE_ID}>`));
+        assert.ok(alert, 'تنبيه الستاف مع زر القبول');
+        console.log('✔ مبلغ أقل -> mismatch: بدون رتبة، التذكرة مفتوحة، الستاف ينتبه');
+    }
+
+    // ---------- مبلغ أكبر ----------
+    {
+        const order = newOrder(), member = makeMember(), channel = makeChannel(member);
+        const flow = runPaymentFlow({ channel, order, member });
+        await waitForCollector(channel);
+        deliver(channel, probotMessage(`<@${PAYER}> transferred \`$5000\` to <@${BANK}>`));
+        await flow;
+        assert.deepEqual(statuses(order), ['mismatch']);
+        assert.equal(channel.deleted, false);
+        console.log('✔ مبلغ أكبر -> mismatch والتذكرة مفتوحة');
     }
 
     // ---------- تحويل من شخص ثاني يُتجاهل ثم تنتهي المهلة ----------

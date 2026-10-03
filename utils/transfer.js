@@ -31,7 +31,7 @@ function extractAmount(text) {
     const backtickMatches = [...text.matchAll(/`([^`]+)`/g)];
     for (const m of backtickMatches) {
         const digits = m[1].replace(/[^\d]/g, '');
-        if (digits.length >= 2) {
+        if (digits.length >= 1) { // يشمل المبالغ الصغيرة (1–9) الناتجة عن الخصومات
             const num = parseInt(digits, 10);
             if (!isNaN(num)) return num;
         }
@@ -40,7 +40,7 @@ function extractAmount(text) {
     const fallbackPatterns = [
         /\$\s*([\d,]+)/,
         /([\d,]+)\s*\$/,
-        /([\d,]{4,})\s*(?:كريديت|credits?)/i,
+        /([\d,]+)\s*(?:كريديت|credits?)/i,
     ];
     for (const pattern of fallbackPatterns) {
         const match = text.match(pattern);

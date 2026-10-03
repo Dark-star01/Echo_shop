@@ -5,10 +5,10 @@ const date = (d) => new Date(d).toLocaleString('ar-SA', { dateStyle: 'short', ti
 
 const STATUS = {
   completed: ['مكتمل', 'ok'], paid: ['مدفوع', 'ok'], awaiting_payment: ['بانتظار الدفع', 'info'],
-  role_failed: ['يحتاج تدخل', 'warn'], error: ['خطأ', 'warn'], failed: ['مبلغ خاطئ', 'bad'],
+  role_failed: ['يحتاج تدخل', 'warn'], error: ['خطأ', 'warn'], failed: ['مبلغ خاطئ', 'bad'], mismatch: ['مبلغ غير مطابق', 'warn'],
   expired: ['منتهي', 'muted'], active: ['فعال', 'ok'], removal_failed: ['فشل السحب', 'warn'], cancelled: ['ملغي', 'muted'], closed_manually: ['أُغلق يدوياً', 'muted'],
 };
-const NEEDS_ATTENTION = ['role_failed', 'error'];
+const NEEDS_ATTENTION = ['role_failed', 'error', 'mismatch'];
 
 let products = [], orders = [], config = null;
 

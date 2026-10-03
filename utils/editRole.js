@@ -4,8 +4,9 @@ const {
     StringSelectMenuBuilder, EmbedBuilder, MessageFlags,
 } = require('discord.js');
 const db = require('./db.js');
-const { eph, ticketTopic, findOpenTicket } = require('./tickets.js');
-const { calculateSendAmount, formatDuration } = require('./helpers.js');
+const { eph, ticketTopic, findOpenTicket, quietDelete } = require('./tickets.js');
+const { logTicket } = require('./logger.js');
+const { calculateSendAmount, formatDuration, withTimeout } = require('./helpers.js');
 const { sanitizeCustomSettings } = require('./customRoleConfig.js');
 const { PAYMENT_TIMEOUT_MS, runPaymentFlow } = require('./payments.js');
 const { startCustomization } = require('./customRoles.js');
@@ -38,18 +39,18 @@ function prefill(role, settings) {
 }
 
 async function handleEditButton(interaction) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral }); // قبل أي استعلام: سوبابيس البطيء كان يفوّت مهلة الـ 3 ثواني
     const rows = await db.getCustomRolesByUser(interaction.user.id);
     if (!rows.length) {
-        return interaction.reply(eph('🎨 تعديل الرتبة متاح فقط لمن اشترى رتبة قابلة للإنشاء. لازم تشتري رتبة أولاً من زر **طلب**.'));
+        return interaction.editReply({ content: '🎨 تعديل الرتبة متاح فقط لمن اشترى رتبة قابلة للإنشاء. لازم تشتري رتبة أولاً من زر **طلب**.' });
     }
     if (rows.length === 1) return startEdit(interaction, rows[0], false);
 
     const menu = new StringSelectMenuBuilder().setCustomId('edit_pick').setPlaceholder('اختر الرتبة')
         .addOptions(rows.slice(0, 25).map(r => ({ label: String(r.name || r.role_id).slice(0, 100), value: String(r.id) })));
-    return interaction.reply({
+    return interaction.editReply({
         content: 'اختر الرتبة التي تريد تعديلها:',
         components: [new ActionRowBuilder().addComponents(menu)],
-        flags: MessageFlags.Ephemeral,
     });
 }
 
@@ -62,7 +63,7 @@ async function handleEditPick(interaction) {
 
 async function startEdit(interaction, row, fromPick) {
     if (fromPick) await interaction.update({ content: '⏳ جاري التجهيز...', components: [] });
-    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    else if (!interaction.deferred) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const done = (content) => interaction.editReply({ content, components: [] });
 
     const guild = interaction.guild, member = interaction.member;
@@ -100,10 +101,10 @@ async function startEdit(interaction, row, fromPick) {
         ];
         if (process.env.STAFF_ROLE_ID) overwrites.push({ id: process.env.STAFF_ROLE_ID, allow: perms });
 
-        channel = await guild.channels.create({
+        channel = await withTimeout(guild.channels.create({
             name: `edit-${member.user.username}`, type: ChannelType.GuildText, parent: category.id,
             topic: ticketTopic(member.id), permissionOverwrites: overwrites,
-        });
+        }), 20_000, 'إنشاء روم التعديل');
 
         const price = settings.edit_price;
         const botSettings = await db.getSettings().catch(() => ({ payment_mode: 'calculated', tax_percent: 0 }));
@@ -120,6 +121,7 @@ async function startEdit(interaction, row, fromPick) {
             status: price > 0 ? 'awaiting_payment' : 'paid', // مجاني: يبدأ التخصيص مباشرة
         });
 
+        logTicket(guild, 'opened', { channel, ownerId: member.id, ticketKind: 'edit' });
         await done(`✅ تم فتح تذكرة التعديل: ${channel}`);
 
         if (price === 0) return startCustomization({ order, channel, member });
@@ -141,7 +143,7 @@ async function startEdit(interaction, row, fromPick) {
         runPaymentFlow({ channel, order, member }).catch((e) => console.error('❌ runPaymentFlow (edit):', e));
     } catch (error) {
         console.error('❌ فشل فتح تذكرة التعديل:', error);
-        if (channel) channel.delete().catch(() => {}); // ما نترك تذكرة بدون طلب
+        if (channel) quietDelete(channel); // ما نترك تذكرة بدون طلب
         await done('❌ حدث خطأ أثناء فتح تذكرة التعديل، حاول مرة أخرى.').catch(() => {});
     } finally {
         locks.delete(member.id);

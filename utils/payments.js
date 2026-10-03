@@ -3,6 +3,7 @@
 // دورة حياة الطلب:
 //   awaiting_payment -> paid -> completed
 //                          \-> role_failed (الدفع تم والتسليم فشل: التذكرة تبقى مفتوحة للستاف)
+//   awaiting_payment -> mismatch (مبلغ غير مطابق: التذكرة تبقى مفتوحة للستاف)
 //   awaiting_payment -> failed | expired | cancelled | error
 const db = require('./db.js');
 const { monitorTransferDetailed, findTransferInHistory, evaluateAmount } = require('./transfer.js');
@@ -12,7 +13,7 @@ const { logOrder } = require('./logger.js');
 const { alertError } = require('./alerts.js');
 const { startCustomization, finalizeRole } = require('./customRoles.js');
 
-const PAYMENT_TIMEOUT_MS = parseInt(process.env.PAYMENT_TIMEOUT_MS, 10) || 120000; // دقيقتين افتراضيًا
+const PAYMENT_TIMEOUT_MS = parseInt(process.env.PAYMENT_TIMEOUT_MS, 10) || 300000; // 5 دقائق افتراضيًا
 const DEFAULT_PROBOT_ID = '282859044593598464';
 
 // طلبات قيد المعالجة الآن (يمنع تشغيل مراقبين اثنين لنفس الطلب)
@@ -73,7 +74,7 @@ async function fulfillOrder({ order, channel, member }) {
     }
     logOrder(channel.guild, 'completed', order, order.duration_days ? `اشتراك ${order.duration_days} يوم` : '');
     await safe('رسالة النجاح', () => channel.send({ content: `✅ تم منح الرتبة **${order.product_name}** بنجاح!` }));
-    scheduleDelete(channel, 5000);
+    scheduleDelete(channel, 5000, { reason: 'اكتمل الطلب' });
     return true;
 }
 
@@ -90,7 +91,7 @@ async function runPaymentFlow({ channel, order, member = null, scanHistory = fal
         if (!member) member = await channel.guild.members.fetch(order.user_id).catch(() => null);
         if (!member) {
             await safe('إلغاء الطلب (العضو غير موجود)', () => db.updateOrder(order.id, { status: 'cancelled', error: 'العضو غير موجود في السيرفر' }));
-            scheduleDelete(channel, 1000);
+            scheduleDelete(channel, 1000, { reason: 'العضو غير موجود في السيرفر' });
             return;
         }
 
@@ -157,24 +158,29 @@ async function runPaymentFlow({ channel, order, member = null, scanHistory = fal
             await safe('تسجيل اللوق', () => db.logTransfer(logBase));
             await fulfillOrder({ order, channel, member });
         } else if (status === 'underpaid' || status === 'overpaid') {
-            await safe('تحديث الطلب (failed)', () => db.updateOrder(order.id, {
-                status: 'failed',
+            // ⚠️ العميل حوّل فعلًا: لا نحذف التذكرة. تبقى مفتوحة والستاف يقرر (إرجاع / تكملة / قبول وتسليم)
+            const diff = status === 'underpaid' ? 'أقل' : 'أكبر';
+            await safe('تحديث الطلب (mismatch)', () => db.updateOrder(order.id, {
+                status: 'mismatch',
                 actual_amount: actualAmount,
-                error: status === 'underpaid' ? 'مبلغ أقل من المطلوب' : 'مبلغ أكبر من المطلوب',
+                error: `مبلغ ${diff} من المطلوب (المحوّل ${actualAmount} — المطلوب ${order.required_amount})`,
             }));
             await safe('تسجيل اللوق', () => db.logTransfer(logBase));
             logOrder(channel.guild, 'mismatch', order, `المحوّل: ${actualAmount} — المطلوب: ${order.required_amount}`);
             await safe('رسالة المبلغ', () => channel.send({
-                content: `❌ المبلغ المحوّل **غير مطابق** للمبلغ المطلوب بالضبط. تم إغلاق التذكرة تلقائيًا.\nإذا كنت تعتقد أن هذا خطأ، تواصل مع الستاف.`,
+                content: `${staffMention()} ⚠️ ${member} حوّل مبلغًا **${diff}** من المطلوب في الطلب #${order.id}.\n`
+                    + `المحوّل: **${Number(actualAmount).toLocaleString()}** — المطلوب: **${Number(order.required_amount).toLocaleString()}**\n`
+                    + `التذكرة **لن تُغلق تلقائيًا**. يا ${member} لا تحوّل أي مبلغ إضافي قبل ما يرد عليك الستاف.\n`
+                    + `الستاف: اضغط **قبول وتسليم** لو المبلغ مقبول، أو عالجوا الأمر يدويًا ثم أغلقوا التذكرة.`,
+                components: [staffActionsRow(order.id, { accept: true })],
             }));
-            scheduleDelete(channel, 5000);
         } else {
             await safe('تحديث الطلب (expired)', () => db.updateOrder(order.id, { status: 'expired', error: 'انتهت مهلة الدفع' }));
             await safe('تسجيل اللوق', () => db.logTransfer(logBase));
             await safe('رسالة المهلة', () => channel.send({
                 content: '❌ لم يتم تأكيد التحويل خلال المهلة المحددة. حاول مرة أخرى لاحقاً، أو تواصل مع الستاف.',
             }));
-            scheduleDelete(channel, 5000);
+            scheduleDelete(channel, 5000, { reason: 'انتهت مهلة الدفع' });
         }
     } catch (error) {
         // ⚠️ خطأ غير متوقع: ما نحذف التذكرة أبدًا (ممكن العميل دفع)، ننبه الستاف فقط

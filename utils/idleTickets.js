@@ -2,7 +2,7 @@
 // لا تُغلق أي تذكرة فيها طلب جارٍ أو مدفوع أو يحتاج ستاف — فقط التذاكر الفاضية من أي طلب.
 const { ChannelType } = require('discord.js');
 const db = require('./db.js');
-const { getTicketOwnerId, scheduleDelete } = require('./tickets.js');
+const { getTicketOwnerId, scheduleDelete, quietDelete } = require('./tickets.js');
 const { alertError } = require('./alerts.js');
 
 const INTERVAL_MS = 10 * 60 * 1000;
@@ -24,7 +24,7 @@ async function checkChannel(guild, channel, hours) {
     if (isWarning) {
         if (Date.now() - lastAt >= GRACE_MS) {
             await channel.send('🔒 تم إغلاق التذكرة لعدم النشاط.');
-            scheduleDelete(channel, 2000);
+            scheduleDelete(channel, 2000, { reason: 'عدم النشاط' });
         }
     } else if (Date.now() - lastAt >= hours * 60 * 60 * 1000) {
         await channel.send(`<@${ownerId}> ${MARK} لا يوجد نشاط في هذه التذكرة. سيتم إغلاقها خلال ساعة، اكتب أي رسالة للإبقاء عليها.`);
@@ -44,7 +44,7 @@ async function sweepEmptyTickets(guild, { dryRun = false } = {}) {
             if ((await channel.messages.fetch({ limit: 1 })).size > 0) continue;
             if ((await db.getOrdersByChannel(channel.id)).length > 0) continue;
             count++;
-            if (!dryRun) { console.warn(`🧹 حذف تذكرة يتيمة فاضية: ${channel.name}`); await channel.delete('Echo Shop — تذكرة فاضية'); }
+            if (!dryRun) { console.warn(`🧹 حذف تذكرة يتيمة فاضية: ${channel.name}`); await quietDelete(channel); }
         } catch (e) { console.error(`❌ فحص التذكرة اليتيمة ${channel.name}:`, e.message); }
     }
     return count;

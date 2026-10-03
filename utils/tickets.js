@@ -1,6 +1,7 @@
 // utils/tickets.js - أدوات التذاكر (ملكية التذكرة، صلاحيات الأزرار، الحذف المؤجل)
 const { PermissionFlagsBits, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
 const db = require('./db.js');
+const { logTicket } = require('./logger.js');
 
 const eph = (content) => ({ content, flags: MessageFlags.Ephemeral });
 
@@ -76,11 +77,36 @@ async function sendTranscript(channel) {
     });
 }
 
-function scheduleDelete(channel, ms = 5000, { transcript = true } = {}) {
+const loggedClosed = new Set(); // تذاكر سُجّل إغلاقها (يمنع التكرار)
+const quietDeletes = new Set();  // حذف داخلي بدون لوق (تذكرة فاضية فشل تجهيزها)
+
+/** حذف روم بدون تسجيله في اللوق كإغلاق تذكرة */
+function quietDelete(channel) {
+    quietDeletes.add(channel.id);
+    return channel.delete().catch(() => {});
+}
+
+/**
+ * يحذف التذكرة بعد مهلة، مع نسخة المحادثة، ويسجّل «تذكرة أُغلقت» في لوق البوت.
+ * by: العضو الذي أغلقها (null = تلقائي) | reason: السبب
+ */
+function scheduleDelete(channel, ms = 5000, { transcript = true, by = null, reason = '' } = {}) {
     setTimeout(async () => {
         if (transcript) await sendTranscript(channel).catch((e) => console.error('❌ فشل حفظ نسخة التذكرة:', e));
+        if (!loggedClosed.has(channel.id)) {
+            loggedClosed.add(channel.id);
+            await logTicket(channel.guild, 'closed', { channel, by, reason });
+        }
         channel.delete().catch(() => {});
     }, ms);
+}
+
+/** حدث حذف أي روم: لو كانت تذكرة انحذفت يدويًا من ديسكورد (بدون البوت) نسجّلها */
+async function handleChannelDelete(channel) {
+    if (loggedClosed.delete(channel.id)) return;
+    if (quietDeletes.delete(channel.id)) return;
+    if (!channel.guild || channel.parentId !== process.env.TICKET_CATEGORY_ID || !getTicketOwnerId(channel)) return;
+    await logTicket(channel.guild, 'closed', { channel, reason: 'حُذفت يدويًا من ديسكورد' });
 }
 
 function ticketButtonsRow() {
@@ -90,9 +116,10 @@ function ticketButtonsRow() {
     );
 }
 
-function staffActionsRow(orderId) {
+function staffActionsRow(orderId, { accept = false } = {}) {
     return new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`retry_role_${orderId}`).setLabel('🔁 إعادة منح الرتبة').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`retry_role_${orderId}`)
+            .setLabel(accept ? '✅ قبول وتسليم الرتبة' : '🔁 إعادة منح الرتبة').setStyle(accept ? ButtonStyle.Success : ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 إغلاق التذكرة').setStyle(ButtonStyle.Secondary),
     );
 }
@@ -108,4 +135,6 @@ module.exports = {
     checkTicketAccess,
     findOpenTicket,
     scheduleDelete,
+    quietDelete,
+    handleChannelDelete,
 };

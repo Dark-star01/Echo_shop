@@ -95,7 +95,7 @@ function makeWorld() {
 
     function makeChannel(name, opts = {}) {
         const ch = {
-            id: '30000000000000' + String(++seq).padStart(4, '0'), name, topic: opts.topic || '', type: ChannelType.GuildText, guild,
+            id: '30000000000000' + String(++seq).padStart(4, '0'), name, topic: opts.topic || '', parentId: opts.parent || null, type: ChannelType.GuildText, guild,
             sent: [], deleted: false, collector: null, client: { on() {}, off() {} },
             permissionOverwrites: { cache: new Collection(), edit: async () => {}, delete: async () => {} },
             messages: { cache: new Collection(), fetch: async () => new Collection() },
@@ -119,7 +119,7 @@ function makeWorld() {
     // محاكاة تفاعل ديسكورد (أزرار/قوائم/مودال/أوامر)
     function interaction(kind, { customId, member, channel, values, fields }) {
         const calls = [];
-        const rec = (name) => async (p) => { calls.push([name, p]); if (name === 'reply') i.replied = true; if (name === 'deferReply' || name === 'deferUpdate') i.deferred = true; };
+        const rec = (name) => async (p) => { calls.push([name, p]); if (['reply', 'editReply', 'followUp', 'update', 'showModal'].includes(name)) i.replied = true; if (name === 'deferReply' || name === 'deferUpdate') i.deferred = true; };
         const i = {
             customId, guild, member, user: member.user, channel, channelId: channel?.id, values, calls, deferred: false, replied: false,
             fields: fields && { getTextInputValue: (k) => fields[k], fields: new Map(Object.keys(fields).map(k => [k, 1])) },
