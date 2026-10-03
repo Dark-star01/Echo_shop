@@ -30,7 +30,7 @@ const { startIdleJob } = require('./utils/idleTickets.js');
 const { applyDiscount, couponProblem } = require('./utils/coupons.js');
 const { startSubscriptionJob } = require('./utils/subscriptions.js');
 const { sanitizeCustomSettings } = require('./utils/customRoleConfig.js');
-const { PAYMENT_TIMEOUT_MS, runPaymentFlow, fulfillOrder, recoverOrders } = require('./utils/payments.js');
+const { PAYMENT_TIMEOUT_MS, runPaymentFlow, fulfillOrder, recoverOrders, isOrderActive } = require('./utils/payments.js');
 
 // ============================================================
 //  🤖  البوت
@@ -115,7 +115,8 @@ client.once(Events.ClientReady, async () => {
 const ticketCreationLocks = new Map(); // userId -> وقت البدء؛ يمنع فتح تذكرتين بنفس اللحظة لنفس العضو
 const TICKET_LOCK_MS = 60_000;
 const ticketStepMs = () => Number(process.env.TICKET_STEP_TIMEOUT_MS) || 20_000;
-const confirmLocks = new Set();        // يمنع بدء عمليتي دفع بنفس التذكرة
+const confirmLocks = new Map();        // channelId -> وقت البدء؛ يمنع بدء عمليتي دفع بنفس التذكرة (ينتهي تلقائيًا بعد 60ث حتى لا يعلق للأبد)
+const CONFIRM_LOCK_MS = 60_000;
 const staffCallCooldown = new Map();   // channelId -> وقت آخر نداء للستاف
 const STAFF_CALL_COOLDOWN_MS = 60_000;
 
@@ -472,7 +473,7 @@ async function handleInteraction(interaction) {
         const blocked = await customProductBlock(product, interaction.user.id);
         if (blocked) return interaction.reply(eph(blocked));
 
-        return interaction.update({ embeds: [productEmbed(product)], components: productRows(product) });
+        return interaction.update({ content: '', embeds: [productEmbed(product)], components: productRows(product) });
     }
 
     // ------------------------------------------------------------
@@ -496,7 +497,7 @@ async function handleInteraction(interaction) {
         const coupon = await db.getCouponByCode(interaction.fields.getTextInputValue('code')).catch(() => null);
         const problem = await couponProblem(coupon, interaction.user.id);
         if (problem) return interaction.reply(eph(`❌ ${problem}`));
-        return interaction.update({ embeds: [productEmbed(product, coupon)], components: productRows(product, coupon) });
+        return interaction.update({ content: '', embeds: [productEmbed(product, coupon)], components: productRows(product, coupon) });
     }
 
     // ------------------------------------------------------------
@@ -516,53 +517,110 @@ async function handleInteraction(interaction) {
         if (!(await checkTicketAccess(interaction))) return;
 
         const channel = interaction.channel;
-        if (confirmLocks.has(channel.id)) {
-            return interaction.reply(eph('⏳ جاري تجهيز عملية الدفع.'));
+        const lockedAt = confirmLocks.get(channel.id);
+        if (lockedAt && Date.now() - lockedAt < CONFIRM_LOCK_MS) {
+            return interaction.reply(eph('⏳ جاري تجهيز طلبك، انتظر لحظة...'));
         }
-        confirmLocks.add(channel.id);
+        const myLock = Date.now();
+        confirmLocks.set(channel.id, myLock);
+
+        // ⏱️ نقيس كل خطوة: لو صار بطء يظهر في اللوق وين بالضبط
+        const t0 = Date.now(), marks = [];
+        const mark = (label) => marks.push(`${label}=${Date.now() - t0}ms`);
+        const step = (promise, label) => withTimeout(promise, ticketStepMs(), label);
+
+        // حالة الطلب أثناء التأكيد — نحتاجها لنعرف كيف نتصرف لو فشلت أي خطوة
+        let order = null, flowStarted = false, panelProduct = null, panelCoupon = null;
+        const ui = (promise, label) => withTimeout(promise, 10_000, label); // أي نداء لديسكورد له مهلة
+
+        // لو فشلت أي خطوة نرجّع لوحة المنتج بأزرارها مع رسالة الخطأ. لا ترمي خطأ أبدًا.
+        const fail = async (content) => {
+            const payload = {
+                content,
+                embeds: panelProduct ? [productEmbed(panelProduct, panelCoupon)] : [],
+                components: panelProduct ? productRows(panelProduct, panelCoupon) : [ticketButtonsRow()],
+            };
+            try {
+                await ui(interaction.editReply(payload), 'استعادة اللوحة');
+            } catch (e1) {
+                // انتهى التفاعل أو رفض ديسكورد التعديل: رسالة جديدة بالأزرار حتى لا يبقى العميل بدون شي
+                await ui(channel.send(payload), 'رسالة بديلة').catch(() => interaction.followUp(eph(content)).catch(() => {}));
+            }
+        };
+        // طلب أُنشئ ولم تبدأ مراقبته لا يجوز أن يبقى «عالقًا» ويحجب التذكرة
+        const cancelOrder = async (reason) => {
+            if (order && !flowStarted) await db.updateOrder(order.id, { status: 'cancelled', error: reason }).catch(() => {});
+        };
 
         try {
-            await interaction.deferUpdate();
-            const fail = (content) => interaction.followUp(eph(content));
-
-            const active = await db.getActiveOrderByChannel(channel.id).catch(() => null);
-            if (active) return fail('⚠️ لديك عملية دفع جارية بالفعل في هذه التذكرة.');
+            // رد فوري: نخفي الأزرار ونعرض «جاري التجهيز»
+            await ui(interaction.update({ content: '⏳ جاري تجهيز طلبك...', components: [] }), 'رد فوري');
+            mark('update');
 
             const [, productIdRaw, couponIdRaw] = interaction.customId.split('_'); // confirm_<product>[_<coupon>]
             const productId = parseInt(productIdRaw, 10);
-            let product;
-            try {
-                product = await db.getProductById(productId);
-            } catch (error) {
-                console.error('❌ فشل جلب المنتج:', error);
-                return fail('❌ حدث خطأ أثناء جلب المنتج.');
+
+            // 3 استعلامات بالتوازي بدل تسلسل (أسرع لو سوبابيس بعيد/بطيء)
+            const [activeRes, productRes, settingsRes] = await Promise.allSettled([
+                step(db.getActiveOrderByChannel(channel.id), 'فحص الطلب الجاري'),
+                step(db.getProductById(productId), 'جلب المنتج'),
+                step(db.getSettings(), 'جلب الإعدادات'),
+            ]);
+            mark('db');
+
+            if (activeRes.status === 'rejected') console.error('❌ فحص الطلب الجاري:', activeRes.reason);
+            let active = activeRes.status === 'fulfilled' ? activeRes.value : null;
+            // طلب «بانتظار الدفع» بدون مراقبة فعلية = يتيم (فشل سابق) → نلغيه ونكمل بدل ما نحجب العميل للأبد
+            if (active && active.status === 'awaiting_payment' && !isOrderActive(active.id)) {
+                console.warn(`⚠️ إلغاء طلب يتيم #${active.id} (بانتظار الدفع بدون مراقبة)`);
+                await db.updateOrder(active.id, { status: 'cancelled', error: 'طلب عالق بدون مراقبة — أُلغي تلقائياً' }).catch(() => {});
+                active = null;
             }
-            if (!product) return fail('❌ هذا المنتج لم يعد متاحاً.');
+
+            if (productRes.status === 'rejected') {
+                console.error('❌ فشل جلب المنتج:', productRes.reason);
+                return await fail('❌ حدث خطأ أثناء جلب المنتج، حاول مرة أخرى.');
+            }
+            const product = productRes.value;
+            if (!product) return await fail('❌ هذا المنتج لم يعد متاحاً.');
+            panelProduct = product;
+            // نرفض هنا (بعد معرفة المنتج) لتعود لوحة المنتج بأزرارها مع الرسالة
+            if (active) return await fail('⚠️ لديك عملية دفع جارية بالفعل في هذه التذكرة.');
 
             const member = interaction.member;
-            if (product.role_id && member.roles.cache.has(product.role_id)) return fail('⚠️ أنت تملك هذه الرتبة بالفعل!');
-            const blocked = await customProductBlock(product, member.id);
-            if (blocked) return fail(blocked);
+            if (product.role_id && member.roles.cache.has(product.role_id)) return await fail('⚠️ أنت تملك هذه الرتبة بالفعل!');
+            let blocked;
+            try {
+                blocked = await step(customProductBlock(product, member.id), 'فحص المنتج');
+            } catch (error) {
+                console.error('❌ فحص المنتج:', error);
+                return await fail('❌ تعذّر التحقق من المنتج، حاول مرة أخرى.');
+            }
+            if (blocked) return await fail(blocked);
+            mark('checks');
 
             // 🎟️ نعيد التحقق من الكوبون وقت التأكيد (ممكن انتهى أو استُنفد)
             let coupon = null;
             if (couponIdRaw) {
-                coupon = await db.getCouponById(parseInt(couponIdRaw, 10)).catch(() => null);
-                const problem = await couponProblem(coupon, member.id);
-                if (problem) return fail(`❌ ${problem}`);
+                coupon = await step(db.getCouponById(parseInt(couponIdRaw, 10)), 'جلب الكوبون').catch(() => null);
+                const problem = await step(couponProblem(coupon, member.id), 'فحص الكوبون').catch(() => 'تعذّر التحقق من الكوبون، حاول مرة أخرى.');
+                if (problem) return await fail(`❌ ${problem}`);
+                panelCoupon = coupon;
+                mark('coupon');
             }
 
-            // 💰 لا توجد ضريبة متجر — السعر هو الصافي المطلوب، ونطلب من العميل مبلغ أكبر ليغطي ضريبة بروبوت
+            // 💰 السعر هو الصافي المطلوب، ونطلب من العميل مبلغ أكبر ليغطي ضريبة بروبوت
             const totalAmount = coupon ? applyDiscount(product.price, coupon.percent) : product.price;
-            const settings = await db.getSettings().catch(() => ({ payment_mode: 'calculated', tax_percent: parseFloat(process.env.PROBOT_TAX_PERCENT) || 0 }));
+            const settings = settingsRes.status === 'fulfilled'
+                ? settingsRes.value
+                : { payment_mode: 'calculated', tax_percent: parseFloat(process.env.PROBOT_TAX_PERCENT) || 0 };
             // الوضع with_tax: العميل يكتب السعر + with tax وبروبوت يضيف الضريبة | الوضع calculated: البوت يحسب المبلغ
             const withTax = settings.payment_mode === 'with_tax';
             const sendAmount = totalAmount === 0 ? 0 : (withTax ? totalAmount : calculateSendAmount(totalAmount, settings.tax_percent));
             const transferCommand = `C ${process.env.BANK_USER_ID} ${sendAmount}${withTax ? ' with tax' : ''}`;
 
-            let order;
             try {
-                order = await db.createOrder({
+                order = await step(db.createOrder({
                     channel_id: channel.id,
                     user_id: member.id,
                     username: member.user.tag,
@@ -577,33 +635,47 @@ async function handleInteraction(interaction) {
                     discount_percent: coupon?.percent ?? null,
                     original_amount: coupon ? product.price : null,
                     duration_days: product.type === 'fixed' ? product.duration_days : null,
-                    status: totalAmount === 0 ? 'paid' : 'awaiting_payment', // خصم 100%: بدون دفع
+                    status: totalAmount === 0 ? 'paid' : 'awaiting_payment', // سعر 0 (مجاني أو خصم 100%): بدون دفع
                     expires_at: new Date(Date.now() + PAYMENT_TIMEOUT_MS).toISOString(),
-                });
+                }), 'إنشاء الطلب');
             } catch (error) {
                 console.error('❌ فشل إنشاء الطلب:', error);
-                return fail('❌ تعذّر إنشاء الطلب، حاول مرة أخرى.');
+                alerts.alertError('فشل إنشاء طلب', error, { context: `${member.user?.tag} — ${product.name} (${totalAmount})` });
+                return await fail('❌ تعذّر إنشاء الطلب، حاول مرة أخرى.');
             }
+            mark('order');
 
             // سباق: شخصان استخدما آخر استخدام بنفس اللحظة — نعيد العدّ بعد إنشاء الطلب
             if (coupon) {
-                const overTotal = coupon.max_uses != null && (await db.countCouponUses(coupon.id)) > coupon.max_uses;
-                const overUser = coupon.max_uses_per_user != null && (await db.countCouponUses(coupon.id, member.id)) > coupon.max_uses_per_user;
-                if (overTotal || overUser) {
-                    await db.updateOrder(order.id, { status: 'cancelled', error: 'تجاوز حد استخدام الكوبون' }).catch(() => {});
-                    return fail('❌ استُنفد هذا الكوبون للتو. اختر منتجك من جديد بدون كوبون أو بكوبون آخر.');
+                let over = false;
+                try {
+                    const overTotal = coupon.max_uses != null && (await step(db.countCouponUses(coupon.id), 'عدّ استخدامات الكوبون')) > coupon.max_uses;
+                    const overUser = coupon.max_uses_per_user != null && (await step(db.countCouponUses(coupon.id, member.id), 'عدّ استخدامات العضو')) > coupon.max_uses_per_user;
+                    over = overTotal || overUser;
+                } catch (error) {
+                    console.error('❌ فحص سباق الكوبون:', error);
+                    await cancelOrder('تعذّر التحقق من حد الكوبون');
+                    return await fail('❌ تعذّر التحقق من الكوبون، حاول مرة أخرى.');
+                }
+                if (over) {
+                    await cancelOrder('تجاوز حد استخدام الكوبون');
+                    panelCoupon = null;
+                    return await fail('❌ استُنفد هذا الكوبون للتو. اختر منتجك من جديد بدون كوبون أو بكوبون آخر.');
                 }
             }
 
-            // 🎁 سعر 0 (منتج مجاني أو خصم 100%): لا دفع ولا مراقبة تحويل — ننتقل مباشرة للتسليم / خطوة ما بعد الدفع
+            // 🎁 سعر 0 (منتج مجاني أو خصم 100%): لا دفع ولا مراقبة تحويل — التسليم لا يعتمد على نجاح تعديل الرسالة
             if (totalAmount === 0) {
+                flowStarted = true;
                 const freeNote = coupon ? `🎟️ تم تطبيق الكوبون (خصم ${coupon.percent}%)` : '🎁 هذا المنتج مجاني';
-                await interaction.editReply({ content: `${freeNote} — جاري تجهيز طلبك...`, embeds: [], components: [] });
-                await db.updateOrder(order.id, { paid_at: new Date().toISOString(), actual_amount: 0 }).catch(() => {});
+                await ui(interaction.editReply({ content: `${freeNote} — جاري تسليم طلبك...`, embeds: [], components: [] }), 'رسالة التسليم')
+                    .catch((e) => console.error('❌ تعديل رسالة التسليم المجاني:', e.message));
+                db.updateOrder(order.id, { paid_at: new Date().toISOString(), actual_amount: 0 }).catch(() => {});
                 fulfillOrder({ order, channel, member }).catch((e) => {
                     console.error('❌ fulfillOrder (مجاني):', e);
                     alerts.alertError(`فشل تسليم طلب مجاني #${order.id}`, e, { ping: true, context: `<@${member.id}> — ${product.name}` });
                 });
+                mark('free');
                 return;
             }
 
@@ -617,7 +689,7 @@ ${discountNote}لشراء رتبة **${product.name}**، قم بتحويل ال�
 
 سيتم التحقق من التحويل ومنحك الرتبة تلقائياً بعد إتمامه فعليًا.
 
-⚠️ **لا تحوّل أي مبلغ غير المبلغ المذكور أعلاه بالضبط.** أي مبلغ مختلف (أكثر أو أقل) سيؤدي لإغلاق التذكرة تلقائيًا فورًا.
+⚠️ **لا تحوّل أي مبلغ غير المبلغ المذكور أعلاه بالضبط.** أي مبلغ مختلف (أكثر أو أقل) سيُنبَّه عليه الستاف وتبقى التذكرة مفتوحة للمراجعة.
                 `)
                 .setFooter({ text: `Echo Shop | ⏳ لديك ${formatDuration(PAYMENT_TIMEOUT_MS)} لإتمام التحويل | طلب #${order.id}` });
 
@@ -625,12 +697,37 @@ ${discountNote}لشراء رتبة **${product.name}**، قم بتحويل ال�
                 new ButtonBuilder().setCustomId(`copy_transfer_${sendAmount}${withTax ? '_tax' : ''}`).setLabel('📋 نسخ أمر التحويل').setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder().setCustomId('request_staff').setLabel('🆘 طلب ستاف').setStyle(ButtonStyle.Secondary),
             );
+            const payPayload = { embeds: [payEmbed], components: [payRow] };
 
-            await interaction.editReply({ embeds: [payEmbed], components: [payRow] });
+            // نعرض تعليمات الدفع: أولًا بتعديل الرسالة، وإن فشل (تفاعل منتهي/خطأ ديسكورد) نرسلها كرسالة جديدة في التذكرة.
+            // لا نبدأ مراقبة الدفع إلا بعد أن تصل التعليمات للعميل، ولا نترك طلبًا بلا مراقبة.
+            try {
+                await ui(interaction.editReply({ content: '', ...payPayload }), 'عرض تعليمات الدفع');
+            } catch (uiError) {
+                console.error('❌ تعديل رسالة الدفع فشل — نرسلها كرسالة جديدة:', uiError.message);
+                try {
+                    await ui(channel.send({ content: `${member}`, ...payPayload }), 'إرسال تعليمات الدفع');
+                } catch (sendError) {
+                    console.error('❌ تعذّر عرض تعليمات الدفع بأي طريقة:', sendError);
+                    alerts.alertError('تعذّر عرض تعليمات الدفع', sendError, { ping: true, context: `<@${member.id}> — طلب #${order.id}` });
+                    await cancelOrder('تعذّر عرض تعليمات الدفع');
+                    return await fail('❌ تعذّر عرض تعليمات الدفع، حاول مرة أخرى.');
+                }
+            }
+            flowStarted = true;
+            mark('pay-embed');
 
             runPaymentFlow({ channel, order, member }).catch((e) => console.error('❌ runPaymentFlow:', e));
+        } catch (error) {
+            // أي خطأ غير متوقع: لا نترك العميل على «⏳ جاري التجهيز» بلا أزرار، ولا طلبًا عالقًا
+            console.error('❌ خطأ غير متوقع في تأكيد الشراء:', error);
+            alerts.alertError('خطأ في تأكيد الشراء', error, { context: `${interaction.user?.tag} — ${interaction.customId}` });
+            await cancelOrder('خطأ غير متوقع أثناء التأكيد');
+            await fail('❌ حدث خطأ غير متوقع، حاول مرة أخرى أو اضغط طلب ستاف.');
         } finally {
-            confirmLocks.delete(channel.id);
+            if (confirmLocks.get(channel.id) === myLock) confirmLocks.delete(channel.id);
+            const total = Date.now() - t0;
+            if (total > 4000) console.warn(`⚠️ تأكيد الشراء بطيء (${total}ms) — ${marks.join(' ')} — راجع سرعة سوبابيس/ديسكورد`);
         }
         return;
     }

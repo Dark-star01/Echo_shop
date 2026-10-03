@@ -237,7 +237,11 @@ async function recoverOrders(guild) {
     }
 }
 
+/** هل الطلب قيد المراقبة الآن في هذه العملية؟ (الطلب بانتظار الدفع بدون مراقبة = يتيم) */
+const isOrderActive = (orderId) => activeOrders.has(orderId);
+
 module.exports = {
+    isOrderActive,
     PAYMENT_TIMEOUT_MS,
     fulfillOrder,
     runPaymentFlow,

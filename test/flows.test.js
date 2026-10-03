@@ -103,6 +103,36 @@ const pay = async (ch, member, amount) => {
     st.products = st.products.filter(p => p.id !== 9);
     log('منتج سعره 0: تسليم مباشر بدون دفع');
 
+    // ===== تأكيد الشراء: بطء/تعليق قاعدة البيانات لا يعلّق الزر ولا يترك القفل =====
+    const dbm = require('../utils/db.js');
+    const SL = W.makeMember('999000000000000001'); const chSL = await openTicket(SL);
+    await press('select_role', SL, chSL, { values: ['1'] });
+    const realGet = dbm.getProductById;
+    // (أ) استعلام بطيء + ضغطة ثانية أثناء التجهيز: ترد «جاري تجهيز» والأولى تكتمل
+    dbm.getProductById = async (id) => { await tick(150); return realGet(id); };
+    const first = press('confirm_1', SL, chSL);
+    await tick(30);
+    const second = await press('confirm_1', SL, chSL);
+    assert.ok(second.last('reply').content.includes('جاري تجهيز'), 'الضغطة الثانية ترد بانتظار');
+    const firstDone = await first;
+    assert.ok(firstDone.last('update').content.includes('جاري تجهيز'), 'رد فوري + إخفاء الأزرار');
+    assert.deepEqual(firstDone.last('update').components, []);
+    assert.ok(firstDone.last('editReply').embeds[0].data.title.includes('إتمام عملية الشراء'));
+    // (ب) استعلام معلّق للأبد: مهلة الخطوة تفك القفل وترجّع الأزرار
+    process.env.TICKET_STEP_TIMEOUT_MS = '100';
+    st.orders.forEach(o => { if (o.channel_id === chSL.id) o.status = 'cancelled'; });
+    dbm.getProductById = () => new Promise(() => {});
+    const hung = await press('confirm_1', SL, chSL);
+    const hungReply = hung.last('editReply');
+    assert.ok(hungReply.content.includes('خطأ'), 'رسالة خطأ بدل التعليق');
+    assert.ok(hungReply.components.length > 0, 'الأزرار ترجع');
+    // (ج) بعد التعليق القفل محرَّر: الضغطة التالية تعمل
+    dbm.getProductById = realGet; delete process.env.TICKET_STEP_TIMEOUT_MS;
+    const after = await press('confirm_1', SL, chSL);
+    assert.ok(!after.calls.some(c => c[0] === 'reply' && String(c[1].content).includes('جاري تجهيز')), 'القفل تحرر');
+    assert.ok(after.last('editReply').embeds[0].data.title.includes('إتمام عملية الشراء'));
+    log('تأكيد الشراء: رد فوري، ضغطة مكررة، تعليق قاعدة البيانات لا يترك القفل');
+
     // ===== شبكة الأمان: تفاعل «يفكر» بدون رد نهائي يُعالج =====
     const stuck = W.interaction('button', { customId: 'shop_edit', member: W.makeMember('777000000000000001'), channel: W.makeChannel('shop') });
     stuck.editReply = async () => { throw new Error('boom'); }; // أول محاولة ترد تفشل

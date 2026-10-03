@@ -130,7 +130,7 @@ async function startEdit(interaction, row, fromPick) {
         const embed = new EmbedBuilder()
             .setColor(0x5865F2)
             .setTitle('🧾 Echo Shop — دفع تعديل الرتبة')
-            .setDescription(`تعديل رتبة **${role.name}** يكلّف **${price.toLocaleString()}** كريديت.\nحوّل المبلغ بالضبط بالأمر التالي:\n\`${command}\`\n\nبعد التحقق من التحويل تفتح لك لوحة التعديل تلقائياً.\n\n⚠️ **لا تحوّل مبلغاً مختلفاً** — أي مبلغ مختلف يغلق التذكرة.`)
+            .setDescription(`تعديل رتبة **${role.name}** يكلّف **${price.toLocaleString()}** كريديت.\nحوّل المبلغ بالضبط بالأمر التالي:\n\`${command}\`\n\nبعد التحقق من التحويل تفتح لك لوحة التعديل تلقائياً.\n\n⚠️ **لا تحوّل مبلغاً مختلفاً** — أي مبلغ مختلف يُنبَّه عليه الستاف وتبقى التذكرة مفتوحة للمراجعة.`)
             .setFooter({ text: `Echo Shop | ⏳ لديك ${formatDuration(PAYMENT_TIMEOUT_MS)} | طلب #${order.id}` });
         await channel.send({
             content: `${member}`,
