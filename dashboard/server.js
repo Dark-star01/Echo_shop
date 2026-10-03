@@ -137,6 +137,16 @@ function start(client) {
         res.json({ success: true });
     });
 
+    // ---------- الهوية العامة (اسم البوت وأفتاره للشعار؛ بدون بيانات حساسة) ----------
+    app.get('/brand.json', (req, res) => {
+        const u = client.user;
+        res.set('Cache-Control', 'public, max-age=300');
+        res.json({
+            name: u?.displayName || u?.username || 'Echo Shop',
+            avatar: u?.displayAvatarURL?.({ extension: 'png', size: 256 }) || null,
+        });
+    });
+
     // ---------- حماية الـ API ----------
     app.use('/api', async (req, res, next) => {
         if (!oauthReady) return res.status(503).json({ error: 'setup' });

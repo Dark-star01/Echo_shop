@@ -2,7 +2,9 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08070c">
+<link id="favicon" rel="icon" href="/logo.svg">
 <title>Echo Shop — لوحة التحكم</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -11,8 +13,10 @@
 <body>
 
 <main id="login" class="login">
+  <i class="orb a"></i><i class="orb b"></i>
   <div class="login-box">
-    <h1>Echo Shop</h1>
+    <img class="logo brandLogo" src="/logo.svg" alt="">
+    <h1 class="brandName">Echo Shop</h1>
     <p>لوحة تحكم المتجر. الدخول للمشرفين فقط.</p>
     <p id="loginError" class="err" hidden></p>
     <a class="btn primary big" href="/auth/login">الدخول بحساب ديسكورد</a>
@@ -21,19 +25,19 @@
 
 <div id="app" class="app" hidden>
   <aside class="side">
-    <div class="brand">Echo Shop</div>
+    <div class="brand"><img class="logo brandLogo" src="/logo.svg" alt=""><span class="brandName">Echo Shop</span></div>
     <nav id="nav">
-      <button data-view="overview" class="active"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg><span>نظرة عامة</span></button>
-      <button data-view="products"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg><span>المنتجات</span></button>
-      <button data-view="coupons"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg><span>الكوبونات</span></button>
-      <button data-view="orders"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>الطلبات</span> <span id="attBadge" class="badge warn" hidden></span></button>
-      <button data-view="subs"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>الاشتراكات</span></button>
-      <button data-view="settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>الإعدادات</span></button>
+      <button data-view="overview" class="active" title="نظرة عامة"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg><span>نظرة عامة</span></button>
+      <button data-view="products" title="المنتجات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg><span>المنتجات</span></button>
+      <button data-view="coupons" title="الكوبونات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg><span>الكوبونات</span></button>
+      <button data-view="orders" title="الطلبات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>الطلبات</span> <span id="attBadge" class="badge warn" hidden></span></button>
+      <button data-view="subs" title="الاشتراكات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>الاشتراكات</span></button>
+      <button data-view="settings" title="الإعدادات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>الإعدادات</span></button>
     </nav>
     <div class="user">
       <span id="avatar" class="avatar"></span>
       <span id="userName"></span>
-      <button id="logout" class="link">تسجيل الخروج</button>
+      <button id="logout" class="link" title="تسجيل الخروج"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg><span>تسجيل الخروج</span></button>
     </div>
   </aside>
 
@@ -118,6 +122,18 @@
   </main>
 </div>
 
+<dialog id="askDialog">
+  <form method="dialog" id="askForm">
+    <h3 id="askTitle"></h3>
+    <p class="msg" id="askMsg"></p>
+    <input id="askInput" hidden>
+    <div class="actions">
+      <button type="button" class="btn" id="askNo">إلغاء</button>
+      <button type="submit" class="btn primary" id="askYes">تأكيد</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="productDialog">
   <form id="productForm" method="dialog">
     <h3 id="dialogTitle">منتج جديد</h3>
@@ -164,7 +180,7 @@
 </dialog>
 
 <div id="toast" class="toast" hidden></div>
-<noscript><main class="login"><div class="login-box"><h1>Echo Shop</h1><p class="err">يجب تفعيل JavaScript لعرض لوحة التحكم.</p></div></main></noscript>
+<noscript><main class="login"><div class="login-box"><h1 class="brandName">Echo Shop</h1><p class="err">يجب تفعيل JavaScript لعرض لوحة التحكم.</p></div></main></noscript>
 <script src="script.js"></script>
 </body>
 </html>

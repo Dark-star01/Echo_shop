@@ -18,6 +18,59 @@ function toast(msg, type = 'ok') {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.hidden = true), 3500);
 }
 
+// ---------- الهوية (اسم البوت وأفتاره) ----------
+const LOGO_FALLBACK = '/logo.svg';
+async function loadBrand() {
+  try {
+    const b = await (await fetch('/brand.json')).json();
+    if (b.name) {
+      document.querySelectorAll('.brandName').forEach((el) => (el.textContent = b.name));
+      document.title = `${b.name} — لوحة التحكم`;
+    }
+    if (b.avatar) {
+      document.querySelectorAll('.brandLogo').forEach((img) => { img.onerror = () => { img.onerror = null; img.src = LOGO_FALLBACK; }; img.src = b.avatar; });
+      const fav = $('#favicon'); if (fav) fav.href = b.avatar;
+    }
+  } catch { /* نبقي الشعار الافتراضي */ }
+}
+loadBrand();
+
+// ---------- أدوات العرض ----------
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const td = (label, html, cls = '') => `<td${cls ? ` class="${cls}"` : ''} data-label="${label}"><div class="v">${html}</div></td>`;
+const SKELETON = '<tr><td class="loading"><div class="sk"></div><div class="sk"></div><div class="sk"></div></td></tr>';
+const EMPTY_ICON = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>';
+const emptyRow = (msg) => `<tr><td class="empty">${EMPTY_ICON}${msg}</td></tr>`;
+
+function countUp(el, to) {
+  if (reduceMotion || to < 2) { el.textContent = fmt(to); return; }
+  const t0 = performance.now(), dur = 700;
+  const tick = (t) => {
+    const k = Math.min((t - t0) / dur, 1);
+    el.textContent = fmt(Math.round(to * (1 - Math.pow(1 - k, 3))));
+    if (k < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// نافذة تأكيد/إدخال بنفس تصميم اللوحة بدل confirm() و prompt()
+const askDlg = $('#askDialog'), askInput = $('#askInput');
+let askDone = null;
+function ask({ title, text = '', yes = 'تأكيد', danger = false, input = null }) {
+  $('#askTitle').textContent = title; $('#askMsg').textContent = text; $('#askMsg').hidden = !text;
+  const yesBtn = $('#askYes'); yesBtn.textContent = yes; yesBtn.className = `btn ${danger ? 'confirm-danger' : 'primary'}`;
+  askInput.hidden = input === null;
+  if (input !== null) { askInput.value = input.value ?? ''; askInput.type = input.type || 'text'; askInput.placeholder = input.placeholder || ''; }
+  return new Promise((resolve) => {
+    askDone = resolve; askDlg.showModal();
+    if (input !== null) askInput.select();
+  });
+}
+const askFinish = (v) => { const f = askDone; askDone = null; if (f) f(v); if (askDlg.open) askDlg.close(); };
+$('#askForm').onsubmit = (e) => { e.preventDefault(); askFinish(askInput.hidden ? true : askInput.value); };
+$('#askNo').onclick = () => askFinish(askInput.hidden ? false : null);
+askDlg.addEventListener('cancel', () => askFinish(askInput.hidden ? false : null));
+
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     ...opts,
@@ -66,31 +119,37 @@ $('#nav').onclick = (e) => { const v = e.target.closest('button')?.dataset.view;
 
 const show = run(async (view) => {
   document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
-  document.querySelectorAll('main.content > section').forEach((s) => (s.hidden = s.id !== `v-${view}`));
-  document.querySelectorAll('.table-wrap table').forEach((t) => (t.innerHTML = '<tr><td class="loading">جارِ التحميل…</td></tr>'));
+  document.querySelectorAll('main.content > section').forEach((s) => {
+    s.hidden = s.id !== `v-${view}`;
+    s.classList.remove('enter');
+    if (!s.hidden) { void s.offsetWidth; s.classList.add('enter'); }
+  });
+  document.querySelectorAll('.table-wrap table').forEach((t) => (t.innerHTML = SKELETON));
+  window.scrollTo({ top: 0 });
   await ({ overview: loadOverview, products: loadProducts, orders: loadOrders, settings: loadSettings, coupons: loadCoupons, subs: loadSubs })[view]();
 });
 
 const statusBadge = (s) => { const [label, cls] = STATUS[s] || [s, 'muted']; return `<span class="badge ${cls}">${esc(label)}</span>`; };
 
 function ordersRows(list) {
-  if (!list.length) return '<tr><td class="empty">لا توجد طلبات بعد.</td></tr>';
+  if (!list.length) return emptyRow('لا توجد طلبات بعد.');
   return `<thead><tr><th>#</th><th>العميل</th><th>المنتج</th><th>المبلغ</th><th>الحالة</th><th>التاريخ</th></tr></thead><tbody>${
     list.map((o) => `<tr class="${NEEDS_ATTENTION.includes(o.status) ? 'attn' : ''}">
-      <td>${o.id}</td><td>${esc(o.username)}<span class="sub">${esc(o.user_id)}</span></td>
-      <td>${esc(o.product_name)}</td><td>${fmt(o.required_amount)}</td>
-      <td>${statusBadge(o.status)}${o.error ? `<span class="sub">${esc(o.error)}</span>` : ''}</td>
-      <td>${date(o.created_at)}</td></tr>`).join('')}</tbody>`;
+      ${td('#', o.id)}${td('العميل', `${esc(o.username)}<span class="sub">${esc(o.user_id)}</span>`)}
+      ${td('المنتج', esc(o.product_name))}${td('المبلغ', fmt(o.required_amount))}
+      ${td('الحالة', `${statusBadge(o.status)}${o.error ? `<span class="sub">${esc(o.error)}</span>` : ''}`)}
+      ${td('التاريخ', date(o.created_at))}</tr>`).join('')}</tbody>`;
 }
 
 // ---------- نظرة عامة ----------
 async function loadOverview() {
   const [stats, list] = await Promise.all([api('/api/stats'), api('/api/orders')]);
   $('#stats').innerHTML = [
-    [fmt(stats.revenue), 'إجمالي الإيرادات'], [fmt(stats.revenueWeek), 'إيرادات آخر 7 أيام'],
-    [fmt(stats.completed), 'طلبات مكتملة'], [fmt(stats.products), 'منتجات'],
-    [fmt(stats.subsActive), 'اشتراكات فعّالة'], [fmt(stats.subsExpiring), 'تنتهي خلال 3 أيام'],
-  ].map(([n, l]) => `<div><b>${n}</b><span>${l}</span></div>`).join('');
+    [stats.revenue, 'إجمالي الإيرادات'], [stats.revenueWeek, 'إيرادات آخر 7 أيام'],
+    [stats.completed, 'طلبات مكتملة'], [stats.products, 'منتجات'],
+    [stats.subsActive, 'اشتراكات فعّالة'], [stats.subsExpiring, 'تنتهي خلال 3 أيام'],
+  ].map(([n, l], i) => `<div style="animation-delay:${i * 60}ms"><b data-n="${n}">0</b><span>${l}</span></div>`).join('');
+  document.querySelectorAll('#stats b').forEach((b) => countUp(b, Number(b.dataset.n)));
 
   const att = $('#attention'), badge = $('#attBadge');
   att.hidden = badge.hidden = !stats.attention;
@@ -98,8 +157,8 @@ async function loadOverview() {
   att.innerHTML = `<span>${stats.attention} طلب دُفع ولم تُسلَّم رتبته بعد.</span><button class="btn sm" id="goAttention">عرضها</button>`;
   if (stats.attention) $('#goAttention').onclick = () => { $('#orderFilter').value = 'attention'; show('orders'); };
   const max = Math.max(...stats.daily.map((d) => d.total), 1);
-  $('#chart').innerHTML = stats.daily.map((d, i) => `<div class="bar" title="${d.day}: ${fmt(d.total)} كريديت">
-    <i style="height:${Math.round((d.total / max) * 100)}%"></i><span>${i % 2 === 0 ? d.day.slice(8) : '&nbsp;'}</span></div>`).join('');
+  $('#chart').innerHTML = stats.daily.map((d, i) => `<div class="bar" data-tip="${d.day}: ${fmt(d.total)} كريديت">
+    <i style="height:${Math.round((d.total / max) * 100)}%;--i:${i}"></i><span>${i % 2 === 0 ? d.day.slice(8) : '&nbsp;'}</span></div>`).join('');
   $('#recent').innerHTML = ordersRows(list.slice(0, 8));
 }
 
@@ -111,17 +170,17 @@ function renderProducts() {
   const list = products.filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.role_id || '').includes(q));
   $('#productsTable').innerHTML = list.length
     ? `<thead><tr><th>المنتج</th><th>الرتبة</th><th>السعر</th><th></th></tr></thead><tbody>${list.map((p) => `<tr>
-        <td>${esc(p.name)}${p.duration_days ? ` <span class="badge muted">${p.duration_days} يوم</span>` : ''}<span class="sub">${esc(p.description)}</span></td>
-        <td>${p.type === 'custom' ? '<span class="badge info">قابلة للإنشاء</span>' : `<code>${esc(p.role_id)}</code>`}</td><td>${fmt(p.price)}</td>
-        <td class="act"><button class="btn sm" data-edit="${p.id}">تعديل</button><button class="btn sm danger" data-del="${p.id}">حذف</button></td></tr>`).join('')}</tbody>`
-    : '<tr><td class="empty">لا توجد منتجات. اضغط «منتج جديد» لإضافة أول منتج.</td></tr>';
+        ${td('المنتج', `${esc(p.name)}${p.duration_days ? ` <span class="badge muted">${p.duration_days} يوم</span>` : ''}<span class="sub">${esc(p.description)}</span>`)}
+        ${td('الرتبة', p.type === 'custom' ? '<span class="badge info">قابلة للإنشاء</span>' : `<code>${esc(p.role_id)}</code>`)}${td('السعر', fmt(p.price))}
+        ${td('', `<button class="btn sm" data-edit="${p.id}">تعديل</button><button class="btn sm danger" data-del="${p.id}">حذف</button>`, 'act')}</tr>`).join('')}</tbody>`
+    : emptyRow('لا توجد منتجات. اضغط «منتج جديد» لإضافة أول منتج.');
 }
 
 $('#search').oninput = renderProducts;
 $('#productsTable').onclick = run(async (e) => {
   const edit = e.target.dataset.edit, del = e.target.dataset.del;
   if (edit) openDialog(products.find((p) => p.id == edit));
-  if (del && confirm('حذف هذا المنتج؟ لا يمكن التراجع.')) {
+  if (del && await ask({ title: 'حذف المنتج', text: 'حذف هذا المنتج؟ لا يمكن التراجع.', yes: 'حذف', danger: true })) {
     await api(`/api/products/${del}`, { method: 'DELETE' });
     toast('تم حذف المنتج'); await loadProducts();
   }
@@ -200,23 +259,24 @@ function renderSubs() {
   const list = $('#subFilter').value === 'active' ? subs.filter((s) => s.status === 'active') : subs;
   $('#subsTable').innerHTML = list.length
     ? `<thead><tr><th>العميل</th><th>الرتبة</th><th>ينتهي</th><th>الحالة</th><th></th></tr></thead><tbody>${list.map((s) => `<tr>
-        <td>${esc(s.username || s.user_id)}<span class="sub">${esc(s.user_id)}</span></td>
-        <td>${esc(s.role_name || s.role_id)}${s.product_name ? `<span class="sub">${esc(s.product_name)}</span>` : ''}</td>
-        <td>${date(s.expires_at)}<span class="sub">${rel(s.expires_at)}</span></td>
-        <td>${statusBadge(s.status)}</td>
-        <td class="act">${s.status === 'active' ? `<button class="btn sm" data-extend="${s.id}">تمديد</button><button class="btn sm danger" data-revoke="${s.id}">سحب الآن</button>` : ''}</td></tr>`).join('')}</tbody>`
-    : '<tr><td class="empty">لا توجد اشتراكات. تظهر هنا عند شراء منتج له مدة اشتراك.</td></tr>';
+        ${td('العميل', `${esc(s.username || s.user_id)}<span class="sub">${esc(s.user_id)}</span>`)}
+        ${td('الرتبة', `${esc(s.role_name || s.role_id)}${s.product_name ? `<span class="sub">${esc(s.product_name)}</span>` : ''}`)}
+        ${td('ينتهي', `${date(s.expires_at)}<span class="sub">${rel(s.expires_at)}</span>`)}
+        ${td('الحالة', statusBadge(s.status))}
+        ${s.status === 'active' ? td('', `<button class="btn sm" data-extend="${s.id}">تمديد</button><button class="btn sm danger" data-revoke="${s.id}">سحب الآن</button>`, 'act') : '<td class="act" data-label=""></td>'}</tr>`).join('')}</tbody>`
+    : emptyRow('لا توجد اشتراكات. تظهر هنا عند شراء منتج له مدة اشتراك.');
 }
 $('#subFilter').onchange = renderSubs;
 $('#subsTable').onclick = run(async (e) => {
   const ext = e.target.dataset.extend, rev = e.target.dataset.revoke;
   if (ext) {
-    const days = parseInt(prompt('عدد أيام التمديد؟', '30'), 10);
+    const val = await ask({ title: 'تمديد الاشتراك', text: 'كم يوم تبي تمدد؟', yes: 'تمديد', input: { value: '30', type: 'number' } });
+    const days = parseInt(val, 10);
     if (!days) return;
     await api(`/api/subscriptions/${ext}/extend`, { method: 'POST', body: { days } });
     toast('تم التمديد'); await loadSubs();
   }
-  if (rev && confirm('سحب الرتبة من العميل الآن وإنهاء الاشتراك؟')) {
+  if (rev && await ask({ title: 'سحب الرتبة', text: 'سحب الرتبة من العميل الآن وإنهاء الاشتراك؟', yes: 'سحب', danger: true })) {
     await api(`/api/subscriptions/${rev}/revoke`, { method: 'POST' });
     toast('تم سحب الرتبة'); await loadSubs();
   }
@@ -231,12 +291,12 @@ function renderCoupons() {
     ? `<thead><tr><th>الكود</th><th>الخصم</th><th>الاستخدام</th><th>للفرد</th><th>الانتهاء</th><th>الحالة</th><th></th></tr></thead><tbody>${coupons.map((c) => {
         const expired = c.expires_at && new Date(c.expires_at) < new Date();
         const state = !c.active ? ['متوقف', 'muted'] : expired ? ['منتهي', 'bad'] : c.max_uses != null && c.used >= c.max_uses ? ['مستنفد', 'warn'] : ['فعال', 'ok'];
-        return `<tr><td><code>${esc(c.code)}</code></td><td>${c.percent}%</td>
-          <td>${c.used} / ${c.max_uses ?? '∞'}</td><td>${c.max_uses_per_user ?? '∞'}</td>
-          <td>${c.expires_at ? date(c.expires_at) : '—'}</td><td><span class="badge ${state[1]}">${state[0]}</span></td>
-          <td class="act"><button class="btn sm" data-toggle="${c.id}">${c.active ? 'إيقاف' : 'تفعيل'}</button><button class="btn sm danger" data-delcoupon="${c.id}">حذف</button></td></tr>`;
+        return `<tr>${td('الكود', `<code>${esc(c.code)}</code>`)}${td('الخصم', `${c.percent}%`)}
+          ${td('الاستخدام', `${c.used} / ${c.max_uses ?? '∞'}`)}${td('للفرد', c.max_uses_per_user ?? '∞')}
+          ${td('الانتهاء', c.expires_at ? date(c.expires_at) : '—')}${td('الحالة', `<span class="badge ${state[1]}">${state[0]}</span>`)}
+          ${td('', `<button class="btn sm" data-toggle="${c.id}">${c.active ? 'إيقاف' : 'تفعيل'}</button><button class="btn sm danger" data-delcoupon="${c.id}">حذف</button>`, 'act')}</tr>`;
       }).join('')}</tbody>`
-    : '<tr><td class="empty">لا توجد كوبونات. اضغط «كوبون جديد».</td></tr>';
+    : emptyRow('لا توجد كوبونات. اضغط «كوبون جديد».');
 }
 
 $('#couponsTable').onclick = run(async (e) => {
@@ -246,7 +306,7 @@ $('#couponsTable').onclick = run(async (e) => {
     await api(`/api/coupons/${t}`, { method: 'PATCH', body: { active: !c.active } });
     await loadCoupons();
   }
-  if (d && confirm('حذف هذا الكوبون؟')) { await api(`/api/coupons/${d}`, { method: 'DELETE' }); toast('تم حذف الكوبون'); await loadCoupons(); }
+  if (d && await ask({ title: 'حذف الكوبون', text: 'حذف هذا الكوبون؟', yes: 'حذف', danger: true })) { await api(`/api/coupons/${d}`, { method: 'DELETE' }); toast('تم حذف الكوبون'); await loadCoupons(); }
 });
 
 const couponDialog = $('#couponDialog'), couponForm = $('#couponForm');

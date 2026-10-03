@@ -42,6 +42,13 @@ const log = (m) => console.log('✔', m);
     admin.roles.cache.set(ADMIN_ROLE, true);
     log('تسجيل الدخول: جلسة موقّعة، انتهاء، تزوير، origin، سحب الرتبة');
 
+    // ---- الهوية العامة (شعار الداشبورد) ----
+    const brand = await call('GET', '/brand.json', null, { cookie: null });
+    assert.equal(brand.status, 200, 'متاح بدون تسجيل دخول');
+    assert.equal(brand.data.name, 'Echo Shop', 'اسم احتياطي لو البوت ما عنده اسم');
+    assert.deepEqual(Object.keys(brand.data).sort(), ['avatar', 'name'], 'لا بيانات حساسة');
+    log('الهوية: /brand.json عام ويرجع الاسم والأفتار فقط');
+
     // ---- المنتجات ----
     const P = (b) => call('POST', '/api/products', { name: 'T', price: 100, ...b });
     assert.equal((await P({ type: 'fixed', role_id: 'abc' })).status, 400);
