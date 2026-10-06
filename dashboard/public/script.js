@@ -90,7 +90,7 @@ function showLogin() {
   $('#app').hidden = true; $('#login').hidden = false;
   const err = new URLSearchParams(location.search).get('error');
   const msgs = {
-    forbidden: 'حسابك لا يملك الرتبة المطلوبة للدخول.',
+    forbidden: 'حسابك غير مضاف في قائمة المسموح لهم. اطلب من المالك إضافتك.',
     failed: 'فشل تسجيل الدخول، حاول مرة أخرى.',
     setup: 'الداشبورد غير مُعدّ بعد (راجع إعدادات OAuth في ملف .env).',
   };
@@ -105,6 +105,7 @@ async function init() {
     $('#avatar').innerHTML = me.avatar
       ? `<img alt="" src="https://cdn.discordapp.com/avatars/${esc(me.id)}/${esc(me.avatar)}.png?size=64">`
       : esc(me.name.slice(0, 1));
+    document.querySelectorAll('.ownerOnly').forEach((b) => (b.hidden = !me.isOwner)); // المشرفون وسجل المراقبة: للمالك فقط
     show('overview');
   refreshBadges();
   } catch (e) {
@@ -128,8 +129,55 @@ const show = run(async (view) => {
   document.querySelectorAll('.table-wrap table').forEach((t) => (t.innerHTML = SKELETON));
   if (view === 'reviews') $('#reviewsList').innerHTML = '<div class="sk"></div><div class="sk"></div>';
   window.scrollTo({ top: 0 });
-  await ({ overview: loadOverview, products: loadProducts, orders: loadOrders, settings: loadSettings, coupons: loadCoupons, subs: loadSubs, reviews: loadReviews })[view]();
+  await ({ overview: loadOverview, products: loadProducts, orders: loadOrders, settings: loadSettings, coupons: loadCoupons, subs: loadSubs, reviews: loadReviews, access: loadAccess, audit: loadAudit })[view]();
 });
+
+// ---------- 🔐 المشرفون (المالك فقط) ----------
+async function loadAccess() {
+  const { owner_id, users } = await api('/api/access');
+  const row = (u, owner) => `<tr><td>${esc(u.username || '—')}${owner ? ' <span class="badge info">المالك</span>' : ''}<span class="sub">${esc(u.user_id)}</span></td>
+    <td>${esc(u.note || '')}</td><td>${u.created_at ? date(u.created_at) : '—'}</td>
+    <td class="act">${owner ? '' : `<button class="btn sm danger" data-rmaccess="${esc(u.user_id)}">إزالة</button>`}</td></tr>`;
+  $('#accessTable').innerHTML = `<thead><tr><th>الحساب</th><th>ملاحظة</th><th>أُضيف</th><th></th></tr></thead><tbody>
+    ${row({ user_id: owner_id, username: 'أنت', note: 'وصول دائم (ID_OWNER)' }, true)}${users.map((u) => row(u, false)).join('')}</tbody>`;
+}
+$('#accessForm').onsubmit = run(async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  await api('/api/access', { method: 'POST', body: { user_id: f.elements.user_id.value, note: f.elements.note.value } });
+  f.reset(); toast('تمت الإضافة — يقدر يدخل الآن'); await loadAccess();
+});
+$('#accessTable').onclick = run(async (e) => {
+  const id = e.target.dataset.rmaccess;
+  if (id && confirm('إزالة هذا الحساب؟ سيُطرد من الداشبورد فوراً.')) { await api(`/api/access/${id}`, { method: 'DELETE' }); toast('تمت الإزالة'); await loadAccess(); }
+});
+
+// ---------- 🕵️ سجل المراقبة (المالك فقط) ----------
+const AUDIT = {
+  'product.create': ['أضاف منتجاً', 'ok'], 'product.update': ['عدّل منتجاً', 'info'], 'product.delete': ['حذف منتجاً', 'bad'],
+  'coupon.create': ['أنشأ كوبوناً', 'ok'], 'coupon.update': ['غيّر حالة كوبون', 'info'], 'coupon.delete': ['حذف كوبوناً', 'bad'],
+  'settings.update': ['عدّل الإعدادات', 'warn'], 'subscription.extend': ['مدّد اشتراكاً', 'info'], 'subscription.revoke': ['سحب اشتراكاً', 'bad'],
+  'review.approve': ['وافق على رتبة', 'ok'], 'review.reject': ['رفض رتبة', 'bad'], 'shop.refresh': ['حدّث إمبد المتجر', 'muted'],
+  'access.add': ['أضاف مشرفاً', 'warn'], 'access.remove': ['أزال مشرفاً', 'warn'], login: ['سجّل دخول', 'muted'], 'login.denied': ['محاولة دخول مرفوضة', 'bad'],
+};
+function auditDetails(a) {
+  const d = a.details || {};
+  if (d.changes && Object.keys(d.changes).length) {
+    return Object.entries(d.changes).map(([k, v]) => `${esc(k)}: ${Array.isArray(v) ? `${esc(v[0] ?? '—')} ← <b>${esc(v[1] ?? '—')}</b>` : esc(v)}`).join('<br>');
+  }
+  return Object.entries(d).filter(([k, v]) => k !== 'changes' && v !== null && v !== undefined).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join('<br>');
+}
+async function loadAudit() {
+  const list = await api('/api/audit' + ($('#auditFilter').value ? `?category=${$('#auditFilter').value}` : ''));
+  $('#auditTable').innerHTML = list.length
+    ? `<thead><tr><th>الوقت</th><th>من</th><th>العملية</th><th>الهدف</th><th>التفاصيل</th></tr></thead><tbody>${list.map((a) => {
+        const [label, cls] = AUDIT[a.action] || [a.action, 'muted'];
+        return `<tr><td>${date(a.created_at)}</td><td>${esc(a.user_name || '—')}<span class="sub">${esc(a.user_id || '')}</span></td>
+          <td><span class="badge ${cls}">${esc(label)}</span></td><td>${esc(a.target || '')}</td><td>${auditDetails(a)}</td></tr>`;
+      }).join('')}</tbody>`
+    : '<tr><td class="empty">لا توجد عمليات مسجّلة بعد.</td></tr>';
+}
+$('#auditFilter').onchange = run(loadAudit);
 
 const statusBadge = (s) => { const [label, cls] = STATUS[s] || [s, 'muted']; return `<span class="badge ${cls}">${esc(label)}</span>`; };
 

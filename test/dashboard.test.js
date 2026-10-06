@@ -5,13 +5,14 @@ const { installDb, makeWorld, tick, E, REF_ROLE, FIXED_ROLE } = require('./helpe
 const st = installDb();
 const W = makeWorld();
 
-const ADMIN_ROLE = '1458271551907565618';
-const admin = W.makeMember('900000000000000001'); admin.roles.cache.set(ADMIN_ROLE, true);
+const admin = W.makeMember(E.ID_OWNER); // المالك (ID_OWNER)
 const outsider = W.makeMember('900000000000000002');
+const helper = W.makeMember('900000000000000003'); // مشرف سيُضاف للوايت لست
 const textChannel = W.makeChannel('logs'); textChannel.isTextBased = () => true;
 W.guild.channels.cache.set(textChannel.id, textChannel);
 W.roles.set('790000000000000000', { id: '790000000000000000', name: 'too-high', position: 60, managed: false });
-const client = { user: { id: '555555555555555555' }, guilds: { cache: { get: () => W.guild } } };
+const client = { user: { id: '555555555555555555' }, guilds: { cache: { get: () => W.guild } },
+    users: { fetch: async (id) => (['900000000000000003', '900000000000000004'].includes(id) ? { id, username: 'user' + id.slice(-1), globalName: 'User ' + id.slice(-1) } : Promise.reject(new Error('Unknown User'))) } };
 
 const BASE = 'http://localhost:3987';
 const cookieFor = (uid, exp = Date.now() + 1e6) => {
@@ -37,10 +38,26 @@ const log = (m) => console.log('✔', m);
     assert.equal((await call('GET', '/api/me', null, { cookie: cookieFor(admin.id).slice(0, -3) + 'abc' })).status, 401, 'توقيع مزوّر');
     assert.equal((await call('POST', '/api/products', {}, { origin: 'http://evil.com' })).status, 403, 'origin غريب');
     assert.equal((await call('GET', '/api/me')).data.name, 'Tester');
-    admin.roles.cache.delete(ADMIN_ROLE);
-    assert.equal((await call('GET', '/api/me')).status, 401, 'سحب الرتبة يطرده فورًا');
-    admin.roles.cache.set(ADMIN_ROLE, true);
-    log('تسجيل الدخول: جلسة موقّعة، انتهاء، تزوير، origin، سحب الرتبة');
+    assert.equal((await call('GET', '/api/me')).data.isOwner, true);
+    log('تسجيل الدخول: جلسة موقّعة، انتهاء، تزوير، origin، غير المسموح مرفوض');
+
+    // ---- 🔐 الوايت لست: المالك فقط يديرها ----
+    const asHelper = { cookie: cookieFor(helper.id) };
+    assert.equal((await call('GET', '/api/me', null, asHelper)).status, 401, 'غير مضاف = مرفوض');
+    assert.equal((await call('POST', '/api/access', { user_id: 'abc' })).status, 400);
+    assert.equal((await call('POST', '/api/access', { user_id: E.ID_OWNER })).status, 400, 'المالك لا يُضاف');
+    assert.equal((await call('POST', '/api/access', { user_id: '900000000000009999' })).status, 400, 'ID غير موجود في ديسكورد');
+    const added = await call('POST', '/api/access', { user_id: helper.id, note: 'مشرف المتجر' });
+    assert.equal(added.status, 200); assert.equal(added.data.user.username, 'User 3'); assert.equal(added.data.user.added_by, E.ID_OWNER);
+    assert.equal((await call('POST', '/api/access', { user_id: helper.id })).status, 409, 'مضاف مسبقاً');
+    const me2 = await call('GET', '/api/me', null, asHelper);
+    assert.equal(me2.status, 200); assert.equal(me2.data.isOwner, false, 'المضاف يدخل فورًا');
+    assert.equal((await call('GET', '/api/products', null, asHelper)).status, 200);
+    assert.equal((await call('GET', '/api/access', null, asHelper)).status, 403, 'المشرف لا يرى القائمة');
+    assert.equal((await call('POST', '/api/access', { user_id: '900000000000000004' }, asHelper)).status, 403, 'المشرف لا يضيف غيره');
+    assert.equal((await call('GET', '/api/audit', null, asHelper)).status, 403, 'المشرف لا يرى السجل');
+    assert.equal((await call('GET', '/api/access')).data.users.length, 1);
+    log('الوايت لست: المالك يضيف، المضاف يدخل فورًا، ولا يرى القائمة ولا السجل');
 
     // ---- الهوية العامة (شعار الداشبورد) ----
     const brand = await call('GET', '/brand.json', null, { cookie: null });
@@ -164,6 +181,53 @@ const log = (m) => console.log('✔', m);
     const r3 = mkReview(tk3, { user_id: '900000000000000099' });
     assert.equal((await call('POST', `/api/reviews/${r3.id}/approve`)).status, 409); assert.equal(r3.status, 'pending_review');
     log('مراجعة الرتب: عرض المدخلات، رفض بسبب، موافقة وتسليم، منع التكرار، تذكرة محذوفة، عميل غادر');
+
+    // ---- 🕵️ سجل المراقبة + الطرد الفوري عند الإزالة ----
+    await tick(100);
+    const aud = (await call('GET', '/api/audit')).data;
+    const find = (a) => aud.find(x => x.action === a);
+    assert.ok(find('access.add') && find('access.add').user_id === E.ID_OWNER, 'إضافة مشرف مسجّلة');
+    assert.ok(find('product.create') && find('product.create').details.price === 100, 'إنشاء منتج مسجّل مع السعر');
+    assert.ok(find('coupon.create') && find('settings.update') && find('product.delete'), 'كوبون/إعدادات/حذف مسجّلة');
+    assert.ok(Object.keys(find('settings.update').details.changes).includes('payment_mode'), 'تعديل الإعدادات يسجّل ما تغيّر');
+    assert.equal(find('product.update').details.changes.price[1], 300, 'تعديل المنتج يسجّل القيمة قبل/بعد');
+    assert.ok(!find('product.update').details.changes.custom_settings, 'لا تغيير كاذب في custom_settings');
+    assert.ok(aud.every(a => a.action !== 'product.create' || a.target), 'الهدف مسجّل');
+    assert.ok((await call('GET', '/api/audit?category=coupon')).data.every(a => a.action.startsWith('coupon.')), 'فلتر الفئة');
+    const auditCount = aud.length;
+    await call('GET', '/api/products'); await tick(50);
+    assert.equal((await call('GET', '/api/audit')).data.length, auditCount, 'القراءة لا تُسجَّل');
+    assert.equal((await call('POST', '/api/products', { name: 'x', price: -1, type: 'fixed', role_id: 'x' })).status, 400); await tick(50);
+    assert.equal((await call('GET', '/api/audit')).data.length, auditCount, 'العملية الفاشلة لا تُسجَّل');
+    assert.equal((await call('DELETE', `/api/access/${E.ID_OWNER}`)).status, 400, 'المالك لا يُزال');
+    assert.equal((await call('DELETE', `/api/access/${helper.id}`)).status, 200);
+    assert.equal((await call('GET', '/api/me', null, asHelper)).status, 401, 'الإزالة تطرده فورًا');
+    log('سجل المراقبة: من/ماذا/قبل→بعد، القراءة والفاشل لا يُسجَّلان، والإزالة تطرد فورًا');
+
+    // ---- 🎨 منتقي الألوان على الويب ----
+    const { makeToken } = require('../utils/colorPicker.js');
+    const dbm = require('../utils/db.js');
+    const ord = await dbm.createOrder({ channel_id: 'c1', user_id: 'u-pick', username: 'u', product_id: 2, product_name: 'Custom', required_amount: 1, send_amount: 1, expires_at: new Date(Date.now() + 1e6).toISOString(), product_type: 'custom',
+        status: 'customizing', draft: { mode: 'gradient', name: 'Cool', color1: '#5865F2', color2: '#EB459E', settings: {}, panel: { channel_id: 'nope', message_id: 'nope' } } });
+    const tok = makeToken(ord.id, 'u-pick');
+    const PK = (t, method = 'GET', body) => call(method, `/pick-api/${t}`, body, { cookie: null });
+    assert.equal((await fetch(`${BASE}/color/${tok}`)).status, 200, 'صفحة المنتقي تُفتح بلا تسجيل دخول');
+    const g = await PK(tok); assert.equal(g.status, 200); assert.equal(g.data.mode, 'gradient'); assert.equal(g.data.palette.length, 24);
+    assert.equal((await PK('garbage')).status, 410, 'توكن مزوّر');
+    assert.equal((await PK(makeToken(ord.id, 'someone-else'))).status, 410, 'توكن لعميل آخر');
+    assert.equal((await PK(makeToken(ord.id, 'u-pick', -1000))).status, 410, 'توكن منتهي');
+    assert.equal((await PK(tok, 'POST', { color1: 'zzz', color2: '#112233' })).status, 400, 'لون غير صالح');
+    assert.equal((await PK(tok, 'POST', { color1: '#112233' })).status, 400, 'التدرج يحتاج لونين');
+    assert.equal((await call('POST', `/pick-api/${tok}`, { color1: '#112233', color2: '#445566' }, { cookie: null, origin: 'http://evil.com' })).status, 403);
+    const saved = await PK(tok, 'POST', { color1: 'ff5733', color2: '#3366ff' });
+    assert.equal(saved.status, 200); assert.equal(saved.data.refreshed, false, 'اللوحة غير موجودة في المحاكاة = لا خطأ');
+    const row = await dbm.getOrderById(ord.id);
+    assert.deepEqual([row.draft.color1, row.draft.color2, row.draft.name], ['#FF5733', '#3366FF', 'Cool'], 'الألوان تُحفظ والباقي يبقى');
+    await dbm.updateOrder(ord.id, { status: 'completed' });
+    assert.equal((await PK(tok)).status, 410, 'بعد اكتمال الطلب يتوقف الرابط');
+    await dbm.updateOrder(ord.id, { status: 'customizing', draft: { ...row.draft, mode: 'holographic' } });
+    assert.equal((await PK(tok, 'POST', { color1: '#112233', color2: '#445566' })).status, 400, 'الهولوغرافيك لا يحتاج ألوان');
+    log('منتقي الألوان: صفحة عامة، توكن موقّع/منتهي/لعميل آخر، حفظ الألوان، إيقاف الرابط بعد الاكتمال');
 
     console.log('\n✅ كل اختبارات الداشبورد نجحت');
     process.exit(0);

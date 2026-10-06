@@ -4,12 +4,14 @@ const path = require('path');
 const crypto = require('crypto');
 const db = require('../utils/db.js');
 const { isValidRoleId } = require('../utils/helpers.js');
+const { readToken } = require('../utils/colorPicker.js');
+const { PALETTE, parseHex } = require('../utils/customRoleConfig.js');
 const { refreshShopMessage, refreshNow: refreshShopNow } = require('../utils/shopMessage.js');
 const { alertError } = require('../utils/alerts.js');
 const { PERMISSION_WHITELIST, COLOR_MODES, sanitizeCustomSettings } = require('../utils/customRoleConfig.js');
 const customRoles = require('../utils/customRoles.js');
 
-const ROLE_ID = process.env.DASHBOARD_ROLE_ID || '1458271551907565618'; // الرتبة المسموح لها بالدخول
+const OWNER_ID = String(process.env.ID_OWNER || '').trim(); // المالك: يدخل دائمًا وهو الوحيد الذي يدير قائمة المسموح لهم ويرى سجل المراقبة
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const SECRET = process.env.SESSION_SECRET || '';
 const BASE_URL = (process.env.DASHBOARD_URL || '').replace(/\/$/, '');
@@ -72,8 +74,52 @@ function validateCouponInput(body = {}) {
 }
 const parseId = (raw) => (Number.isInteger(Number(raw)) && Number(raw) > 0 ? Number(raw) : null);
 
+// ---------- 🕵️ سجل المراقبة: من عدّل ماذا ----------
+const SETTING_KEYS = ['payment_mode', 'tax_percent', 'reference_role_id', 'log_channel_id', 'transcript_channel_id', 'alert_channel_id', 'idle_close_hours'];
+const PRODUCT_KEYS = ['type', 'role_id', 'name', 'price', 'description', 'features', 'duration_days', 'custom_settings'];
+const norm = (v) => (v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''));
+function changes(before, after, keys) {
+    const out = {};
+    for (const k of keys) if (k in after && norm(before?.[k]) !== norm(after[k])) out[k] = k === 'custom_settings' ? 'عُدّلت' : [before?.[k] ?? null, after[k] ?? null];
+    return out;
+}
+// [الطلب، regex للمسار، اسم الحدث، دالة تجلب الحالة «قبل» لتظهر في السجل]
+const AUDIT_ROUTES = [
+    ['POST', /^\/products$/, 'product.create'],
+    ['PUT', /^\/products\/(\d+)$/, 'product.update', (id) => db.getProductById(Number(id))],
+    ['DELETE', /^\/products\/(\d+)$/, 'product.delete', (id) => db.getProductById(Number(id))],
+    ['POST', /^\/shop\/refresh$/, 'shop.refresh'],
+    ['POST', /^\/reviews\/(\d+)\/approve$/, 'review.approve'],
+    ['POST', /^\/reviews\/(\d+)\/reject$/, 'review.reject'],
+    ['POST', /^\/subscriptions\/(\d+)\/extend$/, 'subscription.extend', (id) => db.getSubscriptionById(Number(id))],
+    ['POST', /^\/subscriptions\/(\d+)\/revoke$/, 'subscription.revoke', (id) => db.getSubscriptionById(Number(id))],
+    ['POST', /^\/coupons$/, 'coupon.create'],
+    ['PATCH', /^\/coupons\/(\d+)$/, 'coupon.update', (id) => db.getCouponById(Number(id))],
+    ['DELETE', /^\/coupons\/(\d+)$/, 'coupon.delete', (id) => db.getCouponById(Number(id))],
+    ['PUT', /^\/settings$/, 'settings.update', () => db.getSettings()],
+    ['POST', /^\/access$/, 'access.add'],
+    ['DELETE', /^\/access\/(\d+)$/, 'access.remove', (id) => db.getDashboardUsers().then((l) => l.find((u) => u.user_id === id))],
+];
+function auditInfo(action, id, before, body = {}) {
+    switch (action) {
+        case 'product.create': return [body.name, { type: body.type, price: Number(body.price) }];
+        case 'product.update': return [`#${id} ${before?.name ?? ''}`, { changes: changes(before, { ...body, duration_days: body.duration_days === '' ? null : body.duration_days }, PRODUCT_KEYS) }];
+        case 'product.delete': return [`#${id} ${before?.name ?? ''}`, { price: before?.price }];
+        case 'coupon.create': return [body.code || '(تلقائي)', { percent: Number(body.percent) }];
+        case 'coupon.update': return [before?.code ?? `#${id}`, { active: body.active }];
+        case 'coupon.delete': return [before?.code ?? `#${id}`, { percent: before?.percent }];
+        case 'settings.update': return ['الإعدادات', { changes: changes(before, body, SETTING_KEYS) }];
+        case 'subscription.extend': return [`#${id}`, { days: Number(body.days), user: before?.user_id }];
+        case 'subscription.revoke': return [`#${id}`, { user: before?.user_id }];
+        case 'access.add': return [String(body.user_id), { note: body.note || null }];
+        case 'access.remove': return [`${before?.username ?? ''} (${id})`, null];
+        default: return [id ? `#${id}` : null, null];
+    }
+}
+
 function start(client) {
     const oauthReady = Boolean(process.env.DISCORD_CLIENT_SECRET && BASE_URL && SECRET.length >= 16);
+    if (!OWNER_ID) console.warn('⚠️ ID_OWNER غير محدد في .env — لن يستطيع أحد دخول الداشبورد.');
     if (!oauthReady) console.warn('⚠️ الداشبورد مقفل: أضف DISCORD_CLIENT_SECRET و DASHBOARD_URL و SESSION_SECRET (16+ حرف) في .env');
 
     const app = express();
@@ -83,13 +129,27 @@ function start(client) {
     const guild = () => client.guilds.cache.get(process.env.GUILD_ID);
 
     // يتحقق من الرتبة مباشرة من السيرفر في كل طلب — لو انسحبت منه الرتبة يطلع فورًا
-    async function hasAccess(userId) {
-        const member = await guild()?.members.fetch(userId).catch(() => null);
-        return Boolean(member && member.roles.cache.has(ROLE_ID));
+    // 🔐 الوايت لست: المالك (من .env) أو من أضافه المالك من لوحة التحكم. فشل القراءة = رفض (ما عدا المالك).
+    let wl = { at: 0, ids: new Set() };
+    async function whitelist() {
+        if (Date.now() - wl.at > 10_000) {
+            try { wl = { at: Date.now(), ids: new Set((await db.getDashboardUsers()).map(u => u.user_id)) }; }
+            catch (error) { console.error('❌ قراءة وايت لست الداشبورد:', error.message); wl = { at: 0, ids: new Set() }; }
+        }
+        return wl.ids;
     }
+    async function hasAccess(userId) {
+        if (!OWNER_ID) return false;
+        if (String(userId) === OWNER_ID) return true;
+        return (await whitelist()).has(String(userId));
+    }
+    const isOwner = (userId) => Boolean(OWNER_ID) && String(userId) === OWNER_ID;
+    const audit = (user, action, target = null, details = null) =>
+        db.addAudit({ user_id: user.id || user.uid, user_name: user.name, action, target, details }).catch((e) => console.error('❌ audit:', e.message));
     const cookieOpts = (req, maxAge) => ({ httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge, path: '/' });
 
     app.set('trust proxy', 1);
+    app.use(['/color', '/pick-api'], (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
     app.use(express.json());
     app.use(express.static(path.join(__dirname, 'public')));
 
@@ -121,7 +181,12 @@ function start(client) {
             const user = await (await fetch('https://discord.com/api/users/@me', {
                 headers: { Authorization: `Bearer ${token.access_token}` },
             })).json();
-            if (!user.id || !(await hasAccess(user.id))) return res.redirect('/?error=forbidden');
+            const displayName = user.global_name || user.username;
+            if (!user.id || !(await hasAccess(user.id))) {
+                if (user.id) audit({ id: user.id, name: displayName }, 'login.denied', user.id, { username: user.username });
+                return res.redirect('/?error=forbidden');
+            }
+            audit({ id: user.id, name: displayName }, 'login', null, null);
 
             res.cookie('echo_session', sign({
                 uid: user.id, name: user.global_name || user.username, avatar: user.avatar, exp: Date.now() + SESSION_MS,
@@ -160,6 +225,22 @@ function start(client) {
         next();
     });
 
+    // 🕵️ كل عملية تعديل ناجحة تُسجَّل باسم صاحبها (مع القيم قبل/بعد في التعديلات)
+    app.use('/api', async (req, res, next) => {
+        if (req.method === 'GET') return next();
+        const route = AUDIT_ROUTES.find(([m, re]) => m === req.method && re.test(req.path));
+        if (!route) return next();
+        const [, re, action, loadBefore] = route;
+        const id = re.exec(req.path)[1];
+        const before = loadBefore ? await Promise.resolve(loadBefore(id)).catch(() => null) : null;
+        res.on('finish', () => {
+            if (res.statusCode >= 400) return;
+            const [target, details] = auditInfo(action, id, before, req.body);
+            audit(req.user, action, target, details);
+        });
+        next();
+    });
+
     const handle = (fn) => async (req, res) => {
         try { await fn(req, res); } catch (error) {
             if (error.code !== '23505') console.error('❌ Dashboard error:', error);
@@ -169,7 +250,75 @@ function start(client) {
         }
     };
 
-    app.get('/api/me', (req, res) => res.json({ id: req.user.uid, name: req.user.name, avatar: req.user.avatar }));
+    app.get('/api/me', (req, res) => res.json({ id: req.user.uid, name: req.user.name, avatar: req.user.avatar, isOwner: isOwner(req.user.uid) }));
+
+    // ---------- 🔐 المالك فقط: قائمة المسموح لهم + سجل المراقبة ----------
+    const ownerOnly = (req, res, next) => (isOwner(req.user.uid) ? next() : res.status(403).json({ error: 'هذا القسم للمالك فقط' }));
+
+    app.get('/api/access', ownerOnly, handle(async (req, res) => res.json({ owner_id: OWNER_ID, users: await db.getDashboardUsers() })));
+
+    app.post('/api/access', ownerOnly, handle(async (req, res) => {
+        const user_id = String(req.body?.user_id ?? '').trim();
+        const note = String(req.body?.note ?? '').trim().slice(0, 100) || null;
+        if (!isValidRoleId(user_id)) return res.status(400).json({ error: 'ID غير صالح (أرقام فقط، 17–20 رقم)' });
+        if (user_id === OWNER_ID) return res.status(400).json({ error: 'المالك عنده وصول دائم ولا يحتاج إضافة' });
+        if ((await db.getDashboardUsers()).some((u) => u.user_id === user_id)) return res.status(409).json({ error: 'هذا الحساب مضاف مسبقاً' });
+        const info = await client.users.fetch(user_id).catch(() => null);
+        if (!info) return res.status(400).json({ error: 'ما لقيت هذا الحساب في ديسكورد — تأكد من الـ ID' });
+        const user = await db.addDashboardUser({ user_id, username: info.globalName || info.username, note, added_by: req.user.uid });
+        wl.at = 0; // يسري الإذن فورًا
+        res.json({ success: true, user });
+    }));
+
+    app.delete('/api/access/:id', ownerOnly, handle(async (req, res) => {
+        const id = String(req.params.id);
+        if (!isValidRoleId(id)) return res.status(400).json({ error: 'ID غير صالح' });
+        if (id === OWNER_ID) return res.status(400).json({ error: 'لا يمكن إزالة المالك' });
+        await db.removeDashboardUser(id);
+        wl.at = 0; // يُطرد فورًا من أي جلسة مفتوحة
+        res.json({ success: true });
+    }));
+
+    app.get('/api/audit', ownerOnly, handle(async (req, res) => {
+        const categories = ['product', 'coupon', 'settings', 'subscription', 'review', 'shop', 'access', 'login'];
+        res.json(await db.getAudit({ limit: 300, category: categories.includes(req.query.category) ? req.query.category : null }));
+    }));
+
+    // ---------- 🎨 منتقي الألوان (رابط موقّع مؤقت بدون تسجيل دخول: التوكن نفسه هو الصلاحية) ----------
+    const pickerOrder = async (token) => {
+        const t = readToken(token);
+        if (!t) return { status: 410, error: 'انتهى الرابط. ارجع للتذكرة واضغط 🎨 منتقي الألوان مرة ثانية.' };
+        const order = await db.getOrderById(t.orderId).catch(() => null);
+        if (!order || order.user_id !== t.userId || !['custom', 'custom_edit'].includes(order.product_type) || !order.draft || order.status !== 'customizing') {
+            return { status: 410, error: 'هذا الطلب لم يعد قابلاً للتعديل.' };
+        }
+        return { order };
+    };
+
+    app.get('/color/:token', (req, res) => res.sendFile(path.join(__dirname, 'public', 'picker.html')));
+
+    app.get('/pick-api/:token', handle(async (req, res) => {
+        const r = await pickerOrder(req.params.token);
+        if (r.error) return res.status(r.status).json({ error: r.error });
+        const d = r.order.draft;
+        res.json({ name: d.name || '', mode: d.mode, color1: d.color1, color2: d.color2, palette: PALETTE.map(([name, hex]) => ({ name, hex })) });
+    }));
+
+    app.post('/pick-api/:token', handle(async (req, res) => {
+        if (req.headers.origin && req.headers.origin !== new URL(BASE_URL).origin) return res.status(403).json({ error: 'origin' });
+        const r = await pickerOrder(req.params.token);
+        if (r.error) return res.status(r.status).json({ error: r.error });
+        const { order } = r, d = order.draft;
+        if (d.mode === 'holographic') return res.status(400).json({ error: 'نمط الهولوغرافيك ثابت ولا يحتاج ألوان.' });
+        const hex = (v) => (parseHex(v) === null ? null : `#${String(v).replace('#', '').toUpperCase()}`);
+        const color1 = hex(req.body?.color1), color2 = hex(req.body?.color2);
+        if (!color1 || (d.mode === 'gradient' && !color2)) return res.status(400).json({ error: 'لون غير صالح' });
+        order.draft = { ...d, color1, ...(d.mode === 'gradient' ? { color2 } : {}) };
+        await db.updateOrder(order.id, { draft: order.draft });
+        const refreshed = await customRoles.refreshPanel(guild(), order).catch(() => false); // تتحدث لوحة التذكرة في ديسكورد
+        res.json({ success: true, refreshed });
+    }));
+
 
     // ---------- المنتجات ----------
     app.get('/api/products', handle(async (req, res) => res.json(await db.getAllProducts())));

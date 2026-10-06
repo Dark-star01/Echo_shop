@@ -6,7 +6,8 @@ const {
 const db = require('./db.js');
 const { logOrder } = require('./logger.js');
 const { eph, checkTicketAccess, isStaffMember, staffMention, staffActionsRow, ticketButtonsRow, scheduleDelete } = require('./tickets.js');
-const { COLOR_MODES, HOLOGRAPHIC, MAX_ICON_BYTES, permissionBits, parseHex } = require('./customRoleConfig.js');
+const { COLOR_MODES, HOLOGRAPHIC, MAX_ICON_BYTES, PALETTE, paletteHex, permissionBits, parseHex } = require('./customRoleConfig.js');
+const { pickerEnabled, pickerUrl } = require('./colorPicker.js');
 
 const safe = async (fn) => { try { return await fn(); } catch (e) { console.error('❌ customRoles:', e); return null; } };
 const holoHex = () => HOLOGRAPHIC.primaryColor;
@@ -17,7 +18,7 @@ function panelPayload(order, note = '') {
     const embed = new EmbedBuilder()
         .setColor(d.mode === 'holographic' ? holoHex() : (parseHex(d.color1) ?? 0x5865F2))
         .setTitle(order.product_type === 'custom_edit' ? '🎨 عدّل رتبتك' : '🎨 صمّم رتبتك')
-        .setDescription(`${note ? `${note}\n\n` : ''}اضبط رتبتك ثم اضغط **معاينة**، وإذا أعجبتك اضغط **تأكيد**.`)
+        .setDescription(`${note ? `${note}\n\n` : ''}اختر **اسم** رتبتك و**لونها** (من القوائم الجاهزة أو 🎨 منتقي الألوان)، ثم اضغط **معاينة**، وإذا أعجبتك اضغط **تأكيد**.`)
         .addFields(
             { name: 'الاسم', value: d.name || '— لم يُحدد —', inline: true },
             { name: 'النمط', value: COLOR_MODES[d.mode], inline: true },
@@ -35,7 +36,20 @@ function panelPayload(order, note = '') {
                 .addOptions(s.color_modes.map(m => ({ label: COLOR_MODES[m], value: m, default: m === d.mode })))
         ));
     }
-    const buttons = [new ButtonBuilder().setCustomId(`cust_edit_${order.id}`).setLabel('✏️ الاسم والألوان').setStyle(ButtonStyle.Primary)];
+    // 🎨 قوائم الألوان الجاهزة (بدل كتابة رمز Hex): قائمة للون الأول، وثانية للتدرج
+    if (d.mode !== 'holographic') {
+        const palette = (which, current, placeholder) => new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder().setCustomId(`cust_palette_${order.id}_${which}`).setPlaceholder(placeholder)
+                .addOptions(PALETTE.map(([name, hex, emoji]) => ({
+                    label: name, value: hex, emoji: { name: emoji }, default: `#${hex}` === String(current || '').toUpperCase(),
+                }))));
+        rows.push(palette(1, d.color1, d.mode === 'gradient' ? '🎨 اللون الأول — اختر لوناً جاهزاً' : '🎨 اختر لوناً جاهزاً'));
+        if (d.mode === 'gradient') rows.push(palette(2, d.color2, '🎨 اللون الثاني — اختر لوناً جاهزاً'));
+    }
+    const buttons = [new ButtonBuilder().setCustomId(`cust_edit_${order.id}`).setLabel('✏️ الاسم').setStyle(ButtonStyle.Primary)];
+    if (d.mode !== 'holographic' && pickerEnabled()) {
+        buttons.push(new ButtonBuilder().setCustomId(`cust_picker_${order.id}`).setLabel('🎨 منتقي الألوان').setStyle(ButtonStyle.Secondary));
+    }
     if (s.allow_icon) buttons.push(new ButtonBuilder().setCustomId(`cust_icon_${order.id}`).setLabel('🖼️ أيقونة').setStyle(ButtonStyle.Secondary));
     buttons.push(
         new ButtonBuilder().setCustomId(`cust_preview_${order.id}`).setLabel('👁️ معاينة').setStyle(ButtonStyle.Secondary),
@@ -71,8 +85,12 @@ function validateDraft(d) {
 async function startCustomization({ order, channel, member }) {
     const draft = { ...(order.draft || {}) };
     draft.mode = draft.mode || draft.settings?.color_modes?.[0] || 'solid';
+    // ألوان افتراضية: المعاينة والتأكيد يعملان فورًا ولا يُطلب من العميل رمز لون
+    draft.color1 = draft.color1 || '#5865F2';
+    draft.color2 = draft.color2 || '#EB459E';
     const updated = { ...order, draft };
-    await channel.send({ content: `${member}`, ...panelPayload(updated, order.required_amount > 0 ? '✅ تم استلام الدفع!' : '') });
+    const sent = await channel.send({ content: `${member}`, ...panelPayload(updated, order.required_amount > 0 ? '✅ تم استلام الدفع!' : '') });
+    draft.panel = { channel_id: channel.id, message_id: sent?.id || null }; // لتحديث اللوحة من منتقي الألوان على الويب
     await safe(() => db.updateOrder(order.id, { status: 'customizing', draft }));
     return true;
 }
@@ -176,7 +194,7 @@ const finalizeRole = (args) => (args.order.product_type === 'custom_edit' ? edit
 
 // ---------- معالج التفاعلات (cust_<action>_<orderId>) ----------
 async function handle(interaction) {
-    const [, action, idStr] = interaction.customId.split('_');
+    const [, action, idStr, which] = interaction.customId.split('_');
     const order = await db.getOrderById(parseInt(idStr, 10)).catch(() => null);
     if (!order || !['custom', 'custom_edit'].includes(order.product_type) || order.channel_id !== interaction.channelId || !order.draft) {
         return interaction.reply(eph('⚠️ هذا الطلب غير صالح أو انتهى.'));
@@ -196,17 +214,32 @@ async function handle(interaction) {
     if (action === 'mode') {
         const mode = interaction.values[0];
         if (!s.color_modes.includes(mode)) return interaction.reply(eph('❌ هذا النمط غير متاح.'));
-        await save({ ...d, mode });
+        await save({ ...d, mode, color1: d.color1 || '#5865F2', color2: d.color2 || '#EB459E' });
         return interaction.update(panelPayload(order));
+    }
+
+    if (action === 'palette') { // لون جاهز من القائمة
+        const hex = interaction.values[0];
+        if (!paletteHex(hex)) return interaction.reply(eph('❌ هذا اللون غير متاح.'));
+        await save({ ...d, [which === '2' ? 'color2' : 'color1']: `#${hex}` });
+        return interaction.update(panelPayload(order));
+    }
+
+    if (action === 'picker') { // رابط منتقي الألوان (موقّع وصالح 30 دقيقة)
+        const url = pickerUrl(order.id, interaction.user.id);
+        if (!url) return interaction.reply(eph('⚠️ منتقي الألوان غير مفعّل حالياً، اختر لوناً من القوائم الجاهزة.'));
+        return interaction.reply({
+            content: '🎨 افتح منتقي الألوان، اختر لونك ثم اضغط **حفظ**، وارجع هنا — اللوحة تتحدث تلقائياً. (الرابط صالح 30 دقيقة)',
+            components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('فتح منتقي الألوان').setURL(url))],
+            flags: eph('').flags,
+        });
     }
 
     if (action === 'edit') {
         const input = (id, label, value, max) => new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(max).setValue(value || ''));
-        const modal = new ModalBuilder().setCustomId(`cust_modal_${order.id}`).setTitle('اسم رتبتك وألوانها')
+        const modal = new ModalBuilder().setCustomId(`cust_modal_${order.id}`).setTitle('اسم رتبتك')
             .addComponents(input('name', `اسم الرتبة (حتى ${s.max_name_length} حرف)`, d.name, s.max_name_length));
-        if (d.mode !== 'holographic') modal.addComponents(input('color1', 'اللون الأول (Hex مثل #FF5733)', d.color1, 7));
-        if (d.mode === 'gradient') modal.addComponents(input('color2', 'اللون الثاني (Hex مثل #3366FF)', d.color2, 7));
         return interaction.showModal(modal);
     }
 
@@ -297,4 +330,15 @@ async function handle(interaction) {
     }
 }
 
-module.exports = { startCustomization, createCustomRole, editCustomRole, finalizeRole, handle, panelPayload };
+/** يحدّث رسالة لوحة التخصيص في التذكرة (يُستخدم من منتقي الألوان على الويب) */
+async function refreshPanel(guild, order) {
+    const p = order.draft?.panel;
+    if (!p?.message_id) return false;
+    const channel = await guild.channels.fetch(p.channel_id || order.channel_id).catch(() => null);
+    const message = await channel?.messages.fetch(p.message_id).catch(() => null);
+    if (!message) return false;
+    await message.edit(panelPayload(order));
+    return true;
+}
+
+module.exports = { panelPayload, refreshPanel, startCustomization, createCustomRole, editCustomRole, finalizeRole, handle };

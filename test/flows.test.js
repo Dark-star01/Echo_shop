@@ -155,7 +155,22 @@ const pay = async (ch, member, amount) => {
     const id = oD.id;
     await press(`cust_mode_${id}`, D, chD, { values: ['gradient'] });
     assert.equal(oD.draft.mode, 'gradient');
-    assert.equal((await press(`cust_edit_${id}`, D, chD)).last('showModal').components.length, 3);
+    assert.equal((await press(`cust_edit_${id}`, D, chD)).last('showModal').components.length, 1, 'المودال للاسم فقط (بدون Hex)');
+    // 🎨 القوائم الجاهزة بدل كتابة الألوان
+    const rowsOf = (ch) => ch.sent.at(-1).components.map(r => r.components.map(c => c.data.custom_id));
+    const panelRows = oD.draft.mode === 'gradient' ? 5 : 4;
+    assert.ok(oD.draft.color1 && oD.draft.color2, 'ألوان افتراضية جاهزة');
+    const pal2 = await press(`cust_palette_${id}_2`, D, chD, { values: ['2ECC71'] });
+    assert.equal(oD.draft.color2, '#2ECC71'); assert.ok(pal2.last('update').components.length <= 5);
+    const pal1 = await press(`cust_palette_${id}_1`, D, chD, { values: ['E74C3C'] });
+    assert.equal(oD.draft.color1, '#E74C3C');
+    const palIds = pal1.last('update').components.map(r => r.components[0].data.custom_id);
+    assert.deepEqual(palIds.filter(x => x.startsWith('cust_palette_')), [`cust_palette_${id}_1`, `cust_palette_${id}_2`], 'قائمتان للتدرج');
+    assert.equal(pal1.last('update').components[1].components[0].options.length, 24);
+    assert.ok((await press(`cust_palette_${id}_1`, D, chD, { values: ['123456'] })).last('reply').content.includes('غير متاح'), 'لون خارج القائمة مرفوض');
+    const pk = await press(`cust_picker_${id}`, D, chD);
+    assert.ok(pk.last('reply').components[0].components[0].data.url.startsWith(`${E.DASHBOARD_URL}/color/`), 'رابط المنتقي الموقّع');
+    assert.equal(panelRows, 5);
     assert.ok((await press(`cust_modal_${id}`, D, chD, { fields: { name: 'bad one', color1: '#FF5733', color2: '#3366FF' } })).last('reply').content.includes('غير مسموحة'));
     assert.ok((await press(`cust_modal_${id}`, D, chD, { fields: { name: 'X', color1: 'zzz', color2: '#3366FF' } })).last('reply').content.includes('غير صالح'));
     assert.ok((await press(`cust_confirm_${id}`, D, chD)).last('reply').content.includes('اكتب اسم'));

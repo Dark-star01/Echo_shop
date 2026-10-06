@@ -325,6 +325,35 @@ async function updateSubscription(id, patch) {
     if (error) throw error;
 }
 
+// ============================================================
+//  🔐  وايت لست الداشبورد + سجل المراقبة
+// ============================================================
+async function getDashboardUsers() {
+    const { data, error } = await supabase.from('dashboard_users').select('*').order('created_at', { ascending: true });
+    if (error) throw error;
+    return data;
+}
+async function addDashboardUser({ user_id, username = null, note = null, added_by = null }) {
+    const { data, error } = await supabase.from('dashboard_users').insert([{ user_id, username, note, added_by }]).select().single();
+    if (error) throw error;
+    return data;
+}
+async function removeDashboardUser(userId) {
+    const { error } = await supabase.from('dashboard_users').delete().eq('user_id', userId);
+    if (error) throw error;
+}
+async function addAudit({ user_id, user_name, action, target = null, details = null }) {
+    const { error } = await supabase.from('audit_log').insert([{ user_id, user_name, action, target, details }]);
+    if (error) throw error;
+}
+async function getAudit({ limit = 200, category = null } = {}) {
+    let query = supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(limit);
+    if (category) query = query.like('action', `${category}.%`);
+    const { data, error } = await query;
+    if (error) throw error;
+    return data;
+}
+
 module.exports = {
     supabase,
     getAllProducts,
@@ -341,6 +370,7 @@ module.exports = {
     getOrdersByStatus,
     getActiveOrderByChannel,
     getOrders,
+    getDashboardUsers, addDashboardUser, removeDashboardUser, addAudit, getAudit,
     getOrdersByChannel,
     getSettings,
     saveSettings,

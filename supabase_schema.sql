@@ -142,3 +142,29 @@ create table if not exists subscriptions (
 );
 create index if not exists subscriptions_due_idx on subscriptions (status, expires_at);
 alter table subscriptions enable row level security;
+
+-- ============================================================
+--  🔐 v4.0: قائمة المسموح لهم بدخول الداشبورد (وايت لست) + سجل المراقبة
+--  المالك يُحدد في .env بالمتغير ID_OWNER (لا يُخزَّن هنا)
+-- ============================================================
+create table if not exists dashboard_users (
+    user_id text primary key,
+    username text,
+    note text,
+    added_by text,
+    created_at timestamptz default now()
+);
+alter table dashboard_users enable row level security;
+
+create table if not exists audit_log (
+    id bigint generated always as identity primary key,
+    user_id text,
+    user_name text,
+    action text not null,          -- مثل: product.create / settings.update / login.denied
+    target text,
+    details jsonb,
+    created_at timestamptz default now()
+);
+create index if not exists audit_log_created_idx on audit_log (created_at desc);
+create index if not exists audit_log_action_idx on audit_log (action);
+alter table audit_log enable row level security;

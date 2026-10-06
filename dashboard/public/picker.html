@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>منتقي الألوان — Echo Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0f1117;--panel:#161a23;--line:#252b3a;--text:#e7e9f0;--muted:#8a91a5;--accent:#5865f2;--ok:#3ba55d;--bad:#ed4245}
+*{box-sizing:border-box;margin:0}
+body{font-family:'Tajawal',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:grid;place-items:center;padding:1rem}
+.card{width:min(520px,100%);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.4rem;display:grid;gap:1.1rem}
+h1{font-size:1.35rem;font-weight:800}p.sub{color:var(--muted);font-size:.9rem}
+.preview{background:#1e2128;border-radius:10px;padding:1.4rem 1rem;text-align:center;font-size:1.7rem;font-weight:800;word-break:break-word}
+.groups{display:grid;gap:.7rem}
+.grp{display:grid;grid-template-columns:auto 1fr auto;gap:.7rem;align-items:center;border:2px solid var(--line);border-radius:10px;padding:.6rem .8rem;cursor:pointer}
+.grp.on{border-color:var(--accent)}
+.grp label{font-weight:700;pointer-events:none}
+input[type=color]{width:54px;height:40px;border:0;background:none;padding:0;cursor:pointer}
+input[type=text]{width:96px;background:#0b0d13;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:.45rem .5rem;text-align:center;font-family:monospace;direction:ltr}
+.sw{display:grid;grid-template-columns:repeat(8,1fr);gap:.45rem}
+.sw button{aspect-ratio:1;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:transform .12s}
+.sw button:hover{transform:scale(1.15)}.sw button:focus-visible,.grp:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.save{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:.85rem;font:inherit;font-weight:800;font-size:1.05rem;cursor:pointer}
+.save:disabled{opacity:.6;cursor:wait}
+.msg{text-align:center;font-weight:700;min-height:1.4em}.msg.ok{color:var(--ok)}.msg.err{color:var(--bad)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main class="card" id="card" hidden>
+  <div><h1>🎨 منتقي الألوان</h1><p class="sub" id="hint">اختر لونك ثم اضغط حفظ، وارجع لديسكورد.</p></div>
+  <div class="preview" id="preview">اسم الرتبة</div>
+  <div class="groups" id="groups"></div>
+  <div><p class="sub" style="margin-bottom:.5rem">ألوان جاهزة (تُطبَّق على اللون المحدد)</p><div class="sw" id="sw"></div></div>
+  <button class="save" id="save">💾 حفظ اللون</button>
+  <p class="msg" id="msg" role="status"></p>
+</main>
+<main class="card" id="dead" hidden><h1>⚠️</h1><p id="deadMsg"></p></main>
+<script>
+const $ = (s) => document.querySelector(s);
+const token = location.pathname.split('/').pop();
+const HEX = /^#[0-9a-f]{6}$/i;
+let d, c = { 1: '#5865F2', 2: '#EB459E' }, active = 1;
+
+function render() {
+  const el = $('#preview'), name = d.name || 'اسم الرتبة';
+  el.textContent = name;
+  if (d.mode === 'gradient') {
+    el.style.cssText = `background:linear-gradient(90deg,${c[1]},${c[2]});-webkit-background-clip:text;background-clip:text;color:transparent`;
+  } else el.style.cssText = `color:${c[1]}`;
+  document.querySelectorAll('.grp').forEach((g) => {
+    const i = g.dataset.i;
+    g.classList.toggle('on', Number(i) === active);
+    g.querySelector('input[type=color]').value = c[i];
+    if (document.activeElement !== g.querySelector('input[type=text]')) g.querySelector('input[type=text]').value = c[i];
+  });
+}
+function setColor(v, i = active) { if (HEX.test(v)) { c[i] = v.toUpperCase(); render(); } }
+
+function dead(msg) { $('#card').hidden = true; $('#dead').hidden = false; $('#deadMsg').textContent = msg; }
+
+(async function load() {
+  let r, j;
+  try { r = await fetch('/pick-api/' + token, { cache: 'no-store' }); j = await r.json(); } catch { return dead('تعذّر الاتصال، حدّث الصفحة.'); }
+  if (!r.ok) return dead(j.error || 'الرابط غير صالح.');
+  d = j;
+  if (d.mode === 'holographic') return dead('نمط الهولوغرافيك ثابت ولا يحتاج اختيار ألوان.');
+  if (HEX.test(d.color1)) c[1] = d.color1.toUpperCase();
+  if (HEX.test(d.color2)) c[2] = d.color2.toUpperCase();
+  const groups = d.mode === 'gradient' ? [1, 2] : [1];
+  $('#groups').innerHTML = groups.map((i) => `<div class="grp" data-i="${i}" tabindex="-1">
+    <label>${groups.length > 1 ? (i === 1 ? 'اللون الأول' : 'اللون الثاني') : 'لون الرتبة'}</label>
+    <span></span><div style="display:flex;gap:.5rem;align-items:center"><input type="text" maxlength="7" aria-label="رمز اللون"><input type="color" aria-label="اختيار اللون"></div></div>`).join('');
+  document.querySelectorAll('.grp').forEach((g) => {
+    const i = Number(g.dataset.i);
+    g.onclick = () => { active = i; render(); };
+    g.querySelector('input[type=color]').oninput = (e) => { active = i; setColor(e.target.value, i); };
+    g.querySelector('input[type=text]').oninput = (e) => { active = i; setColor(e.target.value.startsWith('#') ? e.target.value : '#' + e.target.value, i); };
+  });
+  $('#sw').innerHTML = d.palette.map((p) => `<button type="button" title="${p.name}" aria-label="${p.name}" data-hex="#${p.hex}" style="background:#${p.hex}"></button>`).join('');
+  $('#sw').onclick = (e) => { const h = e.target.dataset.hex; if (h) setColor(h); };
+  if (groups.length > 1) $('#hint').textContent = 'اضغط على اللون الأول أو الثاني ثم اختر لونه، وسيظهر التدرج في المعاينة.';
+  $('#card').hidden = false; render();
+})();
+
+$('#save').onclick = async () => {
+  const btn = $('#save'), msg = $('#msg');
+  btn.disabled = true; msg.className = 'msg'; msg.textContent = 'جاري الحفظ…';
+  try {
+    const r = await fetch('/pick-api/' + token, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ color1: c[1], color2: c[2] }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'فشل الحفظ');
+    msg.className = 'msg ok';
+    msg.textContent = j.refreshed ? '✅ تم الحفظ! ارجع لديسكورد — اللوحة تحدّثت.' : '✅ تم الحفظ! ارجع لديسكورد واضغط 👁️ معاينة.';
+  } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
+  btn.disabled = false;
+};
+</script>
+</body>
+</html>

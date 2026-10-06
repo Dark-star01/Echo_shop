@@ -1,6 +1,6 @@
 {
   "name": "echo-shop",
-  "version": "3.4.2",
+  "version": "4.0.0",
   "description": "Echo Shop — Discord role shop with ticket system and web dashboard",
   "main": "index.js",
   "scripts": {

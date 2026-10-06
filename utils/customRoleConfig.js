@@ -63,7 +63,19 @@ function parseHex(input) {
     return m ? parseInt(m[1], 16) : null;
 }
 
+// 🎨 ألوان جاهزة تظهر في قائمة داخل ديسكورد (وفي منتقي الألوان على الويب)
+const PALETTE = [
+    ['أحمر', 'E74C3C', '🔴'], ['أحمر غامق', 'B71C1C', '🟥'], ['وردي', 'E91E63', '🌸'], ['وردي فاتح', 'FF9FF3', '💗'],
+    ['برتقالي', 'E67E22', '🟠'], ['ذهبي', 'F1C40F', '🟡'], ['أصفر', 'FFEB3B', '⭐'], ['ليموني', 'C6FF00', '🍋'],
+    ['أخضر', '2ECC71', '🟢'], ['أخضر غامق', '1F8B4C', '🌿'], ['فيروزي', '1ABC9C', '🧊'], ['سماوي', '00D4FF', '💧'],
+    ['أزرق', '3498DB', '🔵'], ['أزرق ملكي', '5865F2', '🟦'], ['كحلي', '2C3E7A', '🌊'], ['بنفسجي', '9B59B6', '🟣'],
+    ['بنفسجي غامق', '71368A', '🔮'], ['بني', '8B5A2B', '🟤'], ['أسود', '23272A', '⚫'], ['رمادي غامق', '4F545C', '🩶'],
+    ['رمادي', '95A5A6', '🪨'], ['فضي', 'C0C7D0', '🥈'], ['أبيض', 'F2F3F5', '⚪'], ['ذهبي غامق', 'B8860B', '🏆'],
+];
+const paletteHex = (hex) => PALETTE.find(([, h]) => h === String(hex || '').replace('#', '').toUpperCase());
+
 module.exports = {
+    PALETTE, paletteHex,
     PERMISSION_WHITELIST, COLOR_MODES, HOLOGRAPHIC, MAX_ICON_BYTES, DEFAULT_CUSTOM_SETTINGS,
     sanitizeCustomSettings, permissionBits, parseHex,
 };

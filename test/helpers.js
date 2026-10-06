@@ -5,7 +5,7 @@ Object.assign(process.env, {
     DISCORD_TOKEN: 'x', GUILD_ID: '100000000000000001', BANK_USER_ID: '999999999999999999',
     TICKET_CATEGORY_ID: '200000000000000001', STAFF_ROLE_ID: '888888888888888888',
     SUPABASE_URL: 'http://127.0.0.1:9', SUPABASE_KEY: 'x', PROBOT_ID: '282859044593598464', PROBOT_TAX_PERCENT: '5',
-    DISCORD_CLIENT_SECRET: 'secret', DASHBOARD_URL: 'http://localhost:3987', SESSION_SECRET: '0123456789abcdef0123456789', PORT: '3987',
+    ID_OWNER: '900000000000000001', DISCORD_CLIENT_SECRET: 'secret', DASHBOARD_URL: 'http://localhost:3987', SESSION_SECRET: '0123456789abcdef0123456789', PORT: '3987',
 });
 const E = process.env;
 const REF_ROLE = '700000000000000000', FIXED_ROLE = '710000000000000001';
@@ -19,6 +19,7 @@ const customSettings = {
 
 function installDb() {
     const st = {
+        dashUsers: [], audit: [],
         products: [
             { id: 1, type: 'fixed', role_id: FIXED_ROLE, name: 'VIP', price: 1000, description: '', features: '', duration_days: null, custom_settings: {} },
             { id: 2, type: 'custom', role_id: null, name: 'Custom', price: 2000, description: '', features: '', duration_days: null, custom_settings: customSettings },
@@ -38,6 +39,11 @@ function installDb() {
         addProduct: async (v) => { const p = { id: st.nextProd++, ...v }; st.products.push(p); return clone(p); },
         updateProduct: async (id, v) => { const p = st.products.find(x => x.id === Number(id)); if (!p) return null; Object.assign(p, v); return clone(p); },
         deleteProduct: async (id) => { st.products = st.products.filter(p => p.id !== Number(id)); },
+        getDashboardUsers: async () => clone(st.dashUsers),
+        addDashboardUser: async (u) => { const row = { created_at: new Date().toISOString(), ...u }; st.dashUsers.push(row); return clone(row); },
+        removeDashboardUser: async (id) => { st.dashUsers = st.dashUsers.filter(u => u.user_id !== id); },
+        addAudit: async (a) => { st.audit.unshift({ id: st.audit.length + 1, created_at: new Date().toISOString(), ...a }); },
+        getAudit: async ({ category = null } = {}) => clone(st.audit.filter(a => !category || a.action.startsWith(category + '.'))),
         getSettings: async () => clone(st.settings),
         saveSettings: async (patch) => { Object.assign(st.settings, patch); st.saved.push(patch); return clone(st.settings); },
         createOrder: async (o) => { const row = { status: 'awaiting_payment', draft: null, created_at: new Date().toISOString(), ...o, id: st.nextId++ }; st.orders.push(row); return clone(row); },

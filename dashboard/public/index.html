@@ -34,6 +34,9 @@
       <button data-view="reviews" title="المراجعات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg><span>المراجعات</span> <span id="revBadge" class="badge info" hidden></span></button>
       <button data-view="subs" title="الاشتراكات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>الاشتراكات</span></button>
       <button data-view="settings" title="الإعدادات"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>الإعدادات</span></button>
+
+      <button data-view="access" class="ownerOnly" title="المشرفون" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span>المشرفون</span></button>
+      <button data-view="audit" class="ownerOnly" title="سجل المراقبة" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg><span>سجل المراقبة</span></button>
     </nav>
     <div class="user">
       <span id="avatar" class="avatar"></span>
@@ -100,6 +103,29 @@
       </div>
       <p class="hint">الاشتراك يُنشأ تلقائياً عند شراء منتج له «مدة اشتراك»، والبوت يسحب الرتبة عند الانتهاء.</p>
       <div class="table-wrap"><table id="subsTable"></table></div>
+    </section>
+
+    <section id="v-access" hidden>
+      <div class="head"><h2>المشرفون</h2></div>
+      <p class="hint">فقط الحسابات في هذه القائمة (وأنت كمالك) تقدر تدخل الداشبورد. الإضافة والحذف يسريان فوراً.</p>
+      <form id="accessForm" class="head">
+        <input name="user_id" inputmode="numeric" placeholder="ID حساب ديسكورد" required>
+        <input name="note" maxlength="100" placeholder="ملاحظة (اختياري، مثل: مشرف المتجر)">
+        <button class="btn primary" type="submit">إضافة</button>
+      </form>
+      <div class="table-wrap"><table id="accessTable"></table></div>
+    </section>
+
+    <section id="v-audit" hidden>
+      <div class="head">
+        <h2>سجل المراقبة</h2>
+        <select id="auditFilter">
+          <option value="">كل العمليات</option><option value="product">المنتجات</option><option value="coupon">الكوبونات</option>
+          <option value="settings">الإعدادات</option><option value="subscription">الاشتراكات</option><option value="review">المراجعات</option>
+          <option value="access">المشرفون</option><option value="login">تسجيلات الدخول</option>
+        </select>
+      </div>
+      <div class="table-wrap"><table id="auditTable"></table></div>
     </section>
 
     <section id="v-settings" hidden>
